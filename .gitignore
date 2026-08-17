@@ -38,3 +38,6 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# External dev plugins managed from dsh-cli-plugins (not part of harness source)
+packages/extensions/dsh-tool-*/
