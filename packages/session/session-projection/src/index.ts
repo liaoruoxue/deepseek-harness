@@ -42,7 +42,11 @@ export type { SessionProjectionMap } from './types.ts'
 export interface ProjectionDefinition<K extends keyof SessionProjectionMap, S> {
   /** The projection key this unit owns (its `SessionProjectionMap` entry). */
   key: K
-  /** Validates the wire payload (`view` output) before it leaves the host. */
+  /**
+   * Validates the wire payload (`view` output) before it leaves the host.
+   * Must be a Zod schema (a value with a `parse` method); `register()`
+   * rejects anything else at load, before any read can touch it.
+   */
   schema: ZodType<SessionProjectionMap[K]>
   /**
    * State for the empty log.
@@ -194,6 +198,22 @@ export class SessionProjectionRegistry extends Service {
   register<K extends keyof SessionProjectionMap, S>(definition: ProjectionDefinition<K, S>): () => void {
     if (!Number.isSafeInteger(definition.stateVersion) || definition.stateVersion < 0) {
       throw new Error(`session projection ${JSON.stringify(definition.key)} stateVersion must be a non-negative integer, got ${String(definition.stateVersion)}`)
+    }
+    // A domain plugin compiles against its own register() stub, so the schema
+    // contract is not statically enforced at this seam: reject a definition
+    // whose schema cannot validate (no parse method) here, at load, instead of
+    // at the first snapshot read (a bare `{ type: 'json' }` tool-output
+    // descriptor is the failure this names).
+    if (typeof definition.schema?.parse !== 'function') {
+      let received: string
+      try {
+        received = JSON.stringify(definition.schema)
+      } catch {
+        received = String(definition.schema)
+      }
+      throw new Error(
+        `session projection ${JSON.stringify(definition.key)} schema must be a Zod schema (a value with a parse() method), got ${received}`,
+      )
     }
     const dispose = this.ctx.effect(function* (this: SessionProjectionRegistry) {
       const key = definition.key as string

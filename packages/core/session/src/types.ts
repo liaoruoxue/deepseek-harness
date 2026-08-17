@@ -389,6 +389,21 @@ export interface SurfaceIntent {
 }
 
 /**
+ * Optional flags for {@link Session.append} on log-only (non-surface) events.
+ *
+ * `ignorable: true` marks a purely informational record that a reader that
+ * does not recognize its `type` may safely skip. Surface events can never be
+ * marked ignorable — they reconstruct the model-visible conversation, so
+ * dropping one would gut the session. This is the supported marker for
+ * out-of-repository plugin events (e.g. a tool publishing workbench state):
+ * without it, an unknown type refuses the whole log on read
+ * ({@link SessionEvent.ignorable}).
+ */
+export interface AppendFlags {
+  ignorable?: true
+}
+
+/**
  * One immutable entry in the session log.
  *
  * A proper discriminated union over `type` (not independent `type`/`data`

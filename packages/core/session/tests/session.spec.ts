@@ -900,6 +900,34 @@ describe('Session', () => {
     expect(session.events).toEqual([])
   })
 
+  it('stamps the ignorable marker on log-only appends and round-trips it', () => {
+    const session = Session.create(SessionId('ignorable-append'))
+    const event = session.append('turn/start', { turn: 1 }, { ignorable: true })
+    expect(event.ignorable).toBe(true)
+    expect(session.events[0]?.ignorable).toBe(true)
+
+    // A log-only append without flags carries no ignorable field.
+    const plain = session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    expect(plain.ignorable).toBeUndefined()
+
+    // The stamped envelope survives seed/load exactly (unknown-type skip contract).
+    const restored = Session.create(SessionId('ignorable-append-restored'), session.events)
+    expect(restored.events[0]?.ignorable).toBe(true)
+    expect(restored.events[1]?.ignorable).toBeUndefined()
+  })
+
+  it('rejects a non-true ignorable marker at append', () => {
+    const session = Session.create(SessionId('ignorable-invalid'))
+    const appendRaw = session.append.bind(session) as unknown as (
+      type: SessionEventType,
+      data: unknown,
+      opts?: unknown,
+    ) => SessionEvent
+    expect(() => appendRaw('turn/start', { turn: 1 }, { ignorable: false }))
+      .toThrow(/invalid ignorable marker/)
+    expect(session.events).toEqual([])
+  })
+
   it('deep-freezes seeded and appended event snapshots', () => {
     const seeded = Session.create(SessionId('seed-frozen'), [{
       type: 'turn/start',

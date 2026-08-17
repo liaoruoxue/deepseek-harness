@@ -172,6 +172,20 @@ describe('SessionProjectionRegistry drive', () => {
     expect(() => ctx.sessionProjections.register({ ...marksUnit(), stateVersion: 1.5 })).toThrow(/stateVersion/)
   })
 
+  it('rejects a definition whose schema has no parse() method at register time', async () => {
+    const { ctx } = await harness()
+    // A domain plugin compiles against its own register() stub, so it can
+    // pass a non-Zod schema (here the bare `{ type: 'json' }` tool-output
+    // descriptor that caused history reads to explode on schema.parse); the
+    // registry must fail loud at load, not at the first snapshot read.
+    const bad = {
+      ...marksUnit(),
+      schema: { type: 'json' },
+    } as unknown as ProjectionDefinition<'test/marks', MarksState>
+    expect(() => ctx.sessionProjections.register(bad))
+      .toThrow(/session projection "test\/marks" schema must be a Zod schema/)
+  })
+
   it('register() disposer removes the key (with its cells) and frees it for re-registration', async () => {
     const { ctx, session } = await harness()
     const dispose = ctx.sessionProjections.register(marksUnit())
