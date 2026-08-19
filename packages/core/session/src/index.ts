@@ -725,8 +725,11 @@ export class Session {
     data: SessionEventMap[T],
     ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T>] : [opts?: AppendOpts]
   ): SessionEvent<T> {
-    const surfaceOpts: SurfaceIntent | undefined = opts[0] as SurfaceIntent | undefined
-    const ignorable = (opts[0] as AppendOpts | undefined)?.ignorable === true
+    // opts[0] is SurfaceIntent for surface types, AppendOpts for non-surface;
+    // narrow by discriminant field presence instead of casting both ways.
+    const appendOpts = opts[0]
+    const surfaceOpts = appendOpts !== undefined && 'surfaceOp' in appendOpts ? appendOpts : undefined
+    const ignorable = appendOpts !== undefined && 'ignorable' in appendOpts && appendOpts.ignorable === true
     const surfaceMetadata = {
       ...surfaceOpts?.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: surfaceOpts.sourceEventSeqs },
       ...surfaceOpts?.surfaceOp === undefined ? {} : { surfaceOp: surfaceOpts.surfaceOp },
