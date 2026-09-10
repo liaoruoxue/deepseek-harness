@@ -98,7 +98,7 @@ const targetHeader = sessionFormatV2ToV3.migrateHeader(sourceHeader)
 - `agent/inbox/spliced.data.inserted[].source.plugin`
 - `session/title-llm-request.data.messages[].source.plugin`
 
-相似插件名、其他来源种类、任意文本、嵌套 JSON 及包含 `:code:` 的历史标识保持不变。此转换不重命名 `run_code` 或其 `code` 参数。已使用任一 V3 保留 PTC 标签的 V2 源事件即使可忽略也会被拒绝；不透明源扩展不得通过迁移获得当前生命周期含义。
+相似插件名、其他来源种类、任意文本、嵌套 JSON 及包含 `:code:` 的历史标识保持不变。此转换不重命名 `run_code` 或其 `code` 参数。已使用任一 V3 保留 PTC 标签的 V2 源事件在信封带有 `ignorable: true` 时会被本边省略，其余情况一律拒绝；不透明源扩展不得通过迁移获得当前生命周期含义。
 
 <a id="canonical-envelopes"></a>
 ### 规范信封与工具错误
@@ -117,7 +117,7 @@ V2 `session-log-deepseek/delivery-accepted` 若携带 `data.sessionFormatVersion
 <a id="source-audit"></a>
 ### 源审计与拒绝
 
-迁移分类[已发布 V2 事件清单](../session-format-v1-to-v2/src/dispositions.ts)，包括仅日志的 `assistant/attempt`，以及 `feedback/message-put` 和 `feedback/message-delete`。[载荷校验器](src/payload.ts)应用精确的已接纳信封和载荷成员，以及已发布嵌套校验。未知事件（即使可忽略）以及被检查记录中未经审计的成员均被拒绝。消息来源分类覆盖下表的五个消息位置：未知来源种类会被拒绝，agent（智能体）中继归属则被接纳，但标识不会被解释为会话引用。
+迁移分类[已发布 V2 事件清单](../session-format-v1-to-v2/src/dispositions.ts)，包括仅日志的 `assistant/attempt`，以及 `feedback/message-put` 和 `feedback/message-delete`。[载荷校验器](src/payload.ts)应用精确的已接纳信封和载荷成员，以及已发布嵌套校验。未知事件在信封带有 `ignorable: true` 时会被本边省略，其余情况一律拒绝；若保留下来的事件引用了被省略的源序号，同样会被拒绝。被检查记录中未经审计的成员均被拒绝。消息来源分类覆盖下表的五个消息位置：未知来源种类会被拒绝，agent（智能体）中继归属则被接纳，但标识不会被解释为会话引用。
 
 内容审计仅接纳 `text`、`reasoning`、`image`、`file`、`tool-call` 和 `tool-result`。它校验归本格式所有的块字段，并在以下有限位置递归审计每层嵌套的 `tool-result.content`：
 

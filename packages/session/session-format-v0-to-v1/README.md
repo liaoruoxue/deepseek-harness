@@ -42,7 +42,7 @@ const targetInheritedEventCount = stage.finish(migrationContext)
 
 `releasedV0SessionFormatCodec` reads the exact v0 header and physical rows, including packed Assistant deltas and range-encoded source-event references. Its decoder emits either a scalar event or a codec-owned compact run through `emitEvent()` and `emitRun()`. `sessionFormatV0ToV1` creates one stateful stage per restore; the static catalog connects that decoder and stage so migration does not retain a physical-row array. `releasedV1SessionFormatCodec` exposes the same row-at-a-time decoder for the v1 physical layout without freezing the ordinary event vocabulary.
 
-The alpha edge refuses every event type outside its frozen inventory, including an unknown event marked `ignorable: true`. It also refuses unexpected payload members. `tool/result.meta` and nested PTC `arguments` remain explicit opaque JSON fields and are preserved without Session-sequence interpretation. Unknown content-block `type`, message-source `kind`, assistant finish-reason `kind`, and `turn/end` reason `kind` arms remain owner-opaque JSON while their known arms receive structural validation.
+The alpha edge admits an event type outside its frozen inventory only when the envelope carries `ignorable: true`, and carries that event unchanged into v1; a later rewriting edge omits it. Every other unknown type is refused. It also refuses unexpected payload members. `tool/result.meta` and nested PTC `arguments` remain explicit opaque JSON fields and are preserved without Session-sequence interpretation. Unknown content-block `type`, message-source `kind`, assistant finish-reason `kind`, and `turn/end` reason `kind` arms remain owner-opaque JSON while their known arms receive structural validation.
 
 The bounded historical normalizers convert `steering/message` to `user/message`, rename `compact/*` events to `compaction/*`, remove `turn/start.trigger`, convert retired `turn/end` reasons, add current message wrappers and deterministic ids for legacy messages, retry chains, and compaction groups, and remove the obsolete `request/header.header.messagePrefix` duplicate. Retired `request/header-delta`, `mode/set`, and the `request/header` fallback reason refuse migration. No other event, reference, source, or payload fact may change.
 
@@ -99,7 +99,7 @@ No direct effect for canonical v0 history. Bounded normalizers preserve model-vi
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Closed first-party inventory** — unknown external-plugin events refuse migration in this alpha policy.
+- **Ignorable-only inventory extension** — an unknown external-plugin event crosses this edge only when its envelope carries `ignorable: true`; without the marker it refuses migration in this alpha policy.
 - **One adjacent edge** — this package does not perform publication or select later migrations.
 
 <a id="dev-note"></a>

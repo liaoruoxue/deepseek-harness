@@ -1220,12 +1220,35 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
     })
   })
 
+  it('admits a v0 ignorable unknown event and omits it from the migrated successor', async () => {
+    const header = meta('released-v0-ignorable', '/work')
+    const sourcePath = historicalLogPath(root, header.cwd, header.id)
+    const source = Buffer.from([
+      JSON.stringify(releasedV0Header(header)),
+      JSON.stringify({ type: 'external/info', seq: 0, time: 1, data: {}, ignorable: true }),
+      '',
+    ].join('\n'))
+    await mkdir(dirname(sourcePath), { recursive: true })
+    await writeFile(sourcePath, source)
+
+    const reader = await ctx.sessionPersistence.open(header.id, 'read')
+    try {
+      expect(reader.header.version).toBe(SESSION_FORMAT_VERSION)
+      const restored = await reader.read()
+      expect(restored.events).toEqual([])
+    } finally {
+      await reader.close()
+    }
+    expect(await readFile(sourcePath)).toEqual(source)
+    await expect(stat(rawLogPath(root, header.cwd, header.id))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('leaves v0 unchanged when migration policy refuses an unknown event', async () => {
     const header = meta('released-v0-refusal', '/work')
     const sourcePath = historicalLogPath(root, header.cwd, header.id)
     const source = Buffer.from([
       JSON.stringify(releasedV0Header(header)),
-      JSON.stringify({ type: 'external/info', seq: 0, time: 1, data: {}, ignorable: true }),
+      JSON.stringify({ type: 'external/info', seq: 0, time: 1, data: {} }),
       '',
     ].join('\n'))
     await mkdir(dirname(sourcePath), { recursive: true })

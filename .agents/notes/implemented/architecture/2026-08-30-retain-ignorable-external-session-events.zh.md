@@ -16,7 +16,7 @@ Status: implemented
 
 只有替代机制在事件生产、持久化、重新加载与传输中都支持当前第三方插件，并为已包含该标记的会话提供显式切换方案后，才能删除此字段。[Session log 版本决策](2026-08-10-session-log-version-mechanism.zh.md)继续定义默认读取必需的安全规则与格式版本策略。
 
-Alpha 实现中的历史格式迁移有意更严格。v0-to-v1 迁移边会拒绝每个未知 v0 类型，包括 ignorable 类型，因为不透明 payload 可能包含格式迁移边无法校验的引用。[Alpha 历史事件决策](2026-08-31-alpha-historical-unknown-event-refusal.zh.md)定义该有限例外；同版本 append 与 reload 继续遵循本记录。
+历史格式迁移会在每条重写边上应用 producer 的标记：恒等的 v0-to-v1 边原样接纳带标记的可忽略事件，而改变位置的 v1-to-v2 与 v2-to-v3 边会省略该事件，并拒绝引用了被省略序号的保留事件；没有标记的未知类型会被拒绝。[历史迁移省略显式可忽略的未知事件](2026-09-10-historical-migration-omits-ignorable-events.zh.md)负责该策略；同版本 append 与 reload 继续遵循本记录。
 
 ## 曾考虑的替代方案
 

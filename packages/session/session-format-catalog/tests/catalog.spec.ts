@@ -145,13 +145,20 @@ describe('first-party Session format catalog', () => {
     expect(JSON.stringify({ header, rows })).toBe(before)
   })
 
-  it.each(['current', 'transformed'] as const)('refuses unclassified ignorable v2 events (%s)', (validation) => {
+  it.each(['current', 'transformed'] as const)('omits unclassified ignorable v2 events (%s)', (validation) => {
     const header = { type: 'session', version: 2, id: 'v2-unknown', createdAt: 1, isSeeded: false, delegationDepth: 0 }
-    const row = { type: 'external/event', seq: 0, time: 1, data: { extra: ['unchanged'] }, ignorable: true }
-    const before = JSON.stringify({ header, row })
+    const rows = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'step/start', seq: 1, time: 2, data: { turn: 1, step: 1 } },
+      { type: 'external/event', seq: 2, time: 3, data: { extra: ['unchanged'] }, ignorable: true },
+    ]
+    const before = JSON.stringify({ header, rows })
     const restore = sessionFormatCatalog.createRestore(header, { recovery: 'strict', validation })
-    expect(() => { restore.decodeRow(row) }).toThrow(/cannot safely transform unclassified event external\/event/)
-    expect(JSON.stringify({ header, row })).toBe(before)
+    for (const row of rows) restore.decodeRow(row)
+    const artifact = restore.finish()
+    expect(artifact.events.map(event => event.type)).not.toContain('external/event')
+    expect(artifact.events.map(event => event.seq)).toEqual(artifact.events.map((_, index) => index))
+    expect(JSON.stringify({ header, rows })).toBe(before)
   })
 
   it.each([0, 1, 2])('migrates frozen v%i PTC records and reopens the actual current representation without rewriting IDs', (version) => {

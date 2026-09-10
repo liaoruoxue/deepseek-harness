@@ -12,7 +12,7 @@ Silently copying such an event can leave stale numeric references after a later 
 
 ## Decision
 
-The alpha v0-to-v1 edge owns a frozen complete released-v0 event and payload inventory. It refuses every unknown historical event type before target staging, including an event marked `ignorable: true`, and refuses unexpected members of known payloads except fields explicitly classified as owner-opaque JSON. Merge-extensible nested discriminants remain part of that explicit policy: unknown content-block types, message-source kinds, assistant finish-reason kinds, and turn-ending reason kinds are preserved as owner-opaque JSON, while known arms receive structural validation. The diagnostic names the event type, its sequence number, and the unchanged source generation.
+The alpha v0-to-v1 edge owns a frozen complete released-v0 event and payload inventory. It refuses every unknown historical event type before target staging, including an event marked `ignorable: true`, and refuses unexpected members of known payloads except fields explicitly classified as owner-opaque JSON. Merge-extensible nested discriminants remain part of that explicit policy: unknown content-block types, message-source kinds, assistant finish-reason kinds, and turn-ending reason kinds are preserved as owner-opaque JSON, while known arms receive structural validation. The diagnostic names the event type, its sequence number, and the unchanged source generation. The omission of a marked ignorable event is now owned by [Historical migration omits explicitly ignorable unknown events](2026-09-10-historical-migration-omits-ignorable-events.md); the refusal of an unmarked unknown event and the payload-member rules here remain current.
 
 The rule applies only while crossing a historical format edge. Ordinary current-format reading retains the established envelope behavior: an unknown required event refuses, while an unknown event carrying `ignorable: true` remains readable. Native current-format external events therefore keep the existing equal-version extension seam, but they do not become implicitly migratable by a future format edge.
 
@@ -22,11 +22,11 @@ Every first-party source event type has an executable disposition and target val
 
 Some v0 Sessions produced by repository-external informational plugins may refuse alpha migration even though the v0 codec can decode them. Refusal publishes no successor, so the suffixless v0 path, bytes, and inode remain authoritative and unchanged. Operators can identify the blocking type from the diagnostic and retain full access to its raw text.
 
-Community feedback will determine the next policy. A later release may add an explicit external-owner migration interface, permit omission of explicitly ignorable historical events while retaining the exact source generation, or keep strict refusal. No option is implied by the alpha marker.
+The current policy omits an explicitly ignorable historical event while retaining the exact source generation ([decision](2026-09-10-historical-migration-omits-ignorable-events.md)). An explicit external-owner migration interface is not implemented.
 
 `SessionSeq` and `SessionLogOffset` make known first-party numeric fields auditable, but they cannot classify numbers inside an unknown runtime object. The migration rule therefore cannot infer safety from the absence of a recognized branded field.
 
-This note supersedes [Retain ignorable external Session events](2026-08-30-retain-ignorable-external-session-events.md) only for historical format migration. That decision remains current for equal-version append and reload.
+This note supersedes [Retain ignorable external Session events](2026-08-30-retain-ignorable-external-session-events.md) only for historical format migration. That decision remains current for equal-version append and reload. The wording of the historical rule changed; [Historical migration omits explicitly ignorable unknown events](2026-09-10-historical-migration-omits-ignorable-events.md) owns the omission of a marked ignorable event and this note remains current for the unmarked refusal and the payload-member inventory.
 
 ## Alternatives considered
 

@@ -15,6 +15,7 @@ import type {
   SessionFormatMigrationStageInput,
 } from '@deepseek-ai/dsh-session-format'
 import { isReleasedAssistantChunkRun } from './codec.ts'
+import { RELEASED_V0_EVENT_DISPOSITIONS } from './dispositions.ts'
 import {
   assertReleasedEventPayload,
   assertReleasedV1Header,
@@ -96,10 +97,20 @@ function normalizeReleasedV0Event(
   const retry = normalizeLegacyRetry(steering, sessionId, state.retryIds)
   const compaction = normalizeLegacyCompaction(retry, sessionId, state)
   const message = normalizeLegacyMessage(compaction, sessionId, state.messageIds)
-  if (message.type !== 'assistant/chunk') assertReleasedEventPayload(message, 0)
+  if (message.type !== 'assistant/chunk' && !carriesIgnorableUnknownType(message)) {
+    assertReleasedEventPayload(message, 0)
+  }
   const messageId = eventMessageId(message)
   if (messageId !== undefined) state.messageIds.set(message.seq, messageId)
   return message
+}
+
+// The identity edge preserves event coordinates, so an unknown event marked
+// ignorable crosses it unchanged and without payload interpretation.
+function carriesIgnorableUnknownType(event: SessionFormatEvent): boolean {
+  return typeof event.type === 'string'
+    && RELEASED_V0_EVENT_DISPOSITIONS[event.type] === undefined
+    && event['ignorable'] === true
 }
 
 function normalizeLegacyCompactionType(event: SessionFormatEvent): SessionFormatEvent {

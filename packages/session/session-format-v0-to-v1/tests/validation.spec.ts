@@ -326,10 +326,39 @@ describe('released event and payload inventory', () => {
     expect(() => { assertPayload(type, data) }).not.toThrow()
   })
 
-  it('refuses unknown v0 events even when the envelope marks them ignorable', () => {
-    const row = { type: 'plugin/unknown', seq: 0, time: 1, data: {}, ignorable: true }
-    expect(() => restoreV0ToV1(v0Header, [row]))
-      .toThrow(/unknown historical event.*refuses.*ignorable/)
+  it('refuses an unknown v0 event whose envelope omits the ignorable marker', () => {
+    const row = { type: 'plugin/unknown', seq: 0, time: 1, data: {} }
+    const refuse = () => restoreV0ToV1(v0Header, [row])
+    expect(refuse).toThrow('format v0 contains unknown historical event type "plugin/unknown" at seq 0')
+    expect(refuse).toThrow('an unknown historical type is refused unless the envelope marks it ignorable')
+  })
+
+  it('refuses malformed unknown v0 envelopes despite a present ignorable member', () => {
+    expect(() => restoreV0ToV1(v0Header, [{ type: 1, seq: 0, time: 1, data: {}, ignorable: true }]))
+      .toThrow(/unknown historical event type 1 at seq 0/)
+    expect(() => restoreV0ToV1(v0Header, [{ type: 'plugin/unknown', seq: 0, time: 1, data: 1, ignorable: true }]))
+      .toThrow(/plugin\/unknown 0 data must be a JSON object/)
+    expect(() => restoreV0ToV1(v0Header, [{ type: 'plugin/unknown', seq: 0, time: 1, data: {}, ignorable: false }]))
+      .toThrow(/unknown historical event type "plugin\/unknown" at seq 0/)
+    expect(() => restoreV0ToV1(v0Header, [{ type: 'plugin/unknown', seq: 1, time: 1, data: {}, ignorable: true }]))
+      .toThrow(/seq gap/)
+    expect(() => restoreV0ToV1(v0Header, [{ type: 'plugin/unknown', seq: 0, time: 1.5, data: {}, ignorable: true }]))
+      .toThrow(/Session event 0 time must be a safe integer/)
+  })
+
+  it('admits an unknown ignorable event under both coordinate vocabulary policies', () => {
+    const event = { type: 'plugin/unknown', seq: 0, time: 1, data: { value: 1 }, ignorable: true }
+    const source = {
+      header: { version: 0, id: 'validation', createdAt: 1, isSeeded: false, delegationDepth: 0 },
+      inheritedEventCount: 0,
+      events: [event],
+    } as const
+    const target = { ...source, header: { ...source.header, version: 1 } } as const
+
+    expect(() => { assertReleasedV0SourceArtifact(source) }).not.toThrow()
+    expect(() => { assertNormalizedReleasedV0Artifact(source) }).not.toThrow()
+    expect(() => { assertReleasedV1MigrationSource(target) }).not.toThrow()
+    expect(() => { assertReleasedV1Artifact(target) }).not.toThrow()
   })
 
   it('exercises each released test validation policy', () => {
@@ -365,8 +394,20 @@ describe('released event and payload inventory', () => {
     }) }).not.toThrow()
     expect(() => { assertReleasedV0SourceArtifact({
       ...v0,
-      events: [{ type: 'plugin/unknown', seq: 0, time: 1, data: {}, ignorable: true }],
-    }) }).toThrow(/unknown historical event/)
+      events: [{ type: 'plugin/unknown', seq: 0, time: 1, data: { value: 1 }, ignorable: true }],
+    }) }).not.toThrow()
+    expect(() => { assertReleasedV0SourceArtifact({
+      ...v0,
+      events: [{ type: 'plugin/unknown', seq: 0, time: 1, data: {} }],
+    }) }).toThrow(/format v0 contains unknown historical event type "plugin\/unknown" at seq 0;/)
+    expect(() => { assertReleasedV1Artifact({
+      ...v1,
+      events: [{ type: 'plugin/unknown', seq: 0, time: 1, data: {} }],
+    }) }).toThrow(/format v1 contains unknown required event type "plugin\/unknown" at seq 0;/)
+    expect(() => { assertReleasedV1PhysicalArtifact({
+      ...v1,
+      events: [{ type: 'plugin/unknown', seq: 0, time: 1, data: {}, ignorable: false }],
+    }) }).toThrow(/Session event 0 ignorable must be true when present/)
   })
 
   it('permits empty Assistant source-event references only under the released-v1 policy', () => {

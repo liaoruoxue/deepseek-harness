@@ -66,11 +66,15 @@ describe('released code preset references', () => {
       .toThrow(/source events must be dense/)
   })
 
-  it('refuses unclassified preset-looking events even when ignorable', () => {
-    const event = Object.freeze({
+  it('omits unclassified preset-looking events only when they are ignorable', () => {
+    const ignorable = Object.freeze({
       type: 'external/selected', seq: 0, time: 1, ignorable: true,
       data: Object.freeze({ agentPreset: 'code', code: 'code' }),
     })
-    expect(() => migrate(event)).toThrow(SessionFormatUnsupportedMigrationError)
+    expect(migrate(ignorable)).toBeUndefined()
+    expect(ignorable.data.agentPreset).toBe('code')
+    expect(() => migrate({
+      type: 'external/selected', seq: 0, time: 1, data: { agentPreset: 'code', code: 'code' },
+    })).toThrow(SessionFormatUnsupportedMigrationError)
   })
 })

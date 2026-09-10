@@ -103,7 +103,7 @@ The restored model-message sequence stays unchanged, so the migration alone does
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Closed first-party source inventory** — an unknown v1 event refuses migration, including an event marked `ignorable: true`.
+- **Omitted ignorable source extensions** — an unknown v1 event carrying `ignorable: true` is omitted from the target; without the marker it refuses migration, and a retained event that references an omitted sequence refuses.
 - **Linear remap state** — streaming retains no complete v1 event array, but the final v2 event array and old-to-new sequence map remain O(event count).
 - **No publication or compatibility fallback** — persistence owns exclusive successor publication, and retained v1 generations are not automatic downgrade or restore inputs.
 

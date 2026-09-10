@@ -374,6 +374,24 @@ describe('released Session format v0 to v1', () => {
     })
   })
 
+  it('carries an unknown event marked ignorable through the identity edge unchanged', () => {
+    const physicalHeader = {
+      type: 'session', version: 0, id: 'ignorable-unknown', createdAt: 1, delegationDepth: 0,
+    }
+    const row = {
+      type: 'plugin/informational', seq: 0, time: 2,
+      data: { payload: { nested: true } }, ignorable: true,
+    }
+
+    const migrated = restoreV0ToV1(physicalHeader, [row])
+
+    expect(migrated.header.version).toBe(1)
+    expect(migrated.events).toEqual([{
+      type: 'plugin/informational', seq: 0, time: 2,
+      data: { payload: { nested: true } }, ignorable: true,
+    }])
+  })
+
   it('keeps the v1 physical codec vocabulary-neutral for current growth and a future source freeze', () => {
     const physicalHeader = {
       type: 'session', version: 1, id: 'ordinary-growth', createdAt: 1, delegationDepth: 0,

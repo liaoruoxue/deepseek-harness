@@ -75,6 +75,6 @@ Current logs, telemetry, and history pages scale by model attempts rather than t
 
 Unlike v1 top-level chunks, which the buffered persistence writer could flush before an attempt ended, v2 has no durable attempt evidence until settlement. A hard process or host loss before settlement discards the complete in-flight stream; `agent/assistant-stream` is not a write-ahead log. This tradeoff avoids a second durability owner for live output.
 
-One settlement can be large, and v1-to-v2 migration materializes the whole artifact plus its sequence map. The closed alpha inventory refuses unknown v1 events and undeclared references instead of guessing. Consumers that need individual chunks call `expandAssistantStream()` and must not infer durability from `agent/assistant-stream`.
+One settlement can be large, and v1-to-v2 migration materializes the whole artifact plus its sequence map. The closed alpha inventory omits an unknown v1 event marked `ignorable: true`, refuses an unknown v1 event without the marker, and refuses undeclared references instead of guessing. Consumers that need individual chunks call `expandAssistantStream()` and must not infer durability from `agent/assistant-stream`.
 
 Migration changes sequence numbers after consumed v1 chunks, so every same-Session reference belongs to an explicit rewrite rule. This constraint makes future cardinality-changing migrations expensive by design and keeps silent semantic redirection out of the format chain.

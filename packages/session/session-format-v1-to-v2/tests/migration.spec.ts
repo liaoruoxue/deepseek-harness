@@ -841,25 +841,211 @@ describe('sessionFormatV1ToV2', () => {
     )
   })
 
-  it('refuses an undeclared v1 event even when its envelope says ignorable', () => {
+  it('omits an ignorable unknown v1 event and keeps retained target coordinates dense', () => {
     const source: SessionFormatArtifact = {
       header: {
         version: 1,
-        id: 'v1-unknown',
+        id: 'v1-ignorable',
         createdAt: 1,
         isSeeded: false,
         delegationDepth: 0,
       },
       inheritedEventCount: 0,
-      events: [{
-        ...event('external/info', 0, 100, { text: 'unknown' }),
-        ignorable: true,
-      }],
+      events: [
+        event('turn/start', 0, 100, { turn: 1 }),
+        event('step/start', 1, 101, { turn: 1, step: 1 }),
+        event('assistant/chunk', 2, 110, {
+          turn: 1,
+          step: 1,
+          chunk: { type: 'text-delta', index: 0, text: 'hello' },
+        }),
+        { ...event('external/info', 3, 111, { text: 'opaque' }), ignorable: true },
+        event('assistant/chunk', 4, 120, {
+          turn: 1,
+          step: 1,
+          chunk: { type: 'finish', reason: { kind: 'stop' } },
+        }),
+        {
+          ...event('assistant/message', 5, 121, { turn: 1, step: 1, message }),
+          sourceEventSeqs: [2, 4],
+          surfaceOp: 'append',
+        },
+        event('step/end', 6, 122, { turn: 1, step: 1 }),
+        event('turn/end', 7, 123, { turn: 1, reason: { kind: 'completed' } }),
+      ],
     }
 
-    expect(() => migrateV1ToV2(source)).toThrow(
-      /format v1 contains unknown event type "external\/info" at seq 0/,
-    )
+    const migrated = migrateV1ToV2(source)
+    expect(migrated.events.map(candidate => candidate.seq)).toEqual([0, 1, 2, 3, 4])
+    expect(migrated.events).toStrictEqual([
+      event('turn/start', 0, 100, { turn: 1 }),
+      event('step/start', 1, 101, { turn: 1, step: 1 }),
+      {
+        ...event('assistant/message', 2, 121, {
+          turn: 1,
+          step: 1,
+          message,
+          stream: [
+            { type: 'text-chunks', time0: 110, index: 0, dt: [], texts: ['hello'] },
+            { type: 'chunk', time: 120, chunk: { type: 'finish', reason: { kind: 'stop' } } },
+          ],
+        }),
+        surfaceOp: 'append',
+      },
+      event('step/end', 3, 122, { turn: 1, step: 1 }),
+      event('turn/end', 4, 123, { turn: 1, reason: { kind: 'completed' } }),
+    ])
+
+    const packed = stageHarness()
+    packed.stage.transformRun(packedRun({
+      firstSeq: 0, lastTime: 5,
+      stream: { type: 'text-chunks', time0: 5, index: 0, dt: [], texts: ['a'] },
+    }), packed.output)
+    packed.stage.transformEvent({ ...event('external/info', 1, 6, { text: 'opaque' }), ignorable: true }, packed.output)
+    packed.stage.transformRun(packedRun({
+      firstSeq: 2, eventCount: 2, lastTime: 9,
+      stream: { type: 'text-chunks', time0: 8, index: 0, dt: [1], texts: ['b', 'c'] },
+    }), packed.output)
+    packed.stage.finish(packed.output)
+    expect(packed.output.values).toStrictEqual([event('assistant/attempt', 0, 9, {
+      turn: 1,
+      step: 1,
+      stream: [{ type: 'text-chunks', time0: 5, index: 0, dt: [3, 1], texts: ['a', 'b', 'c'] }],
+    })])
+  })
+
+  it('does not buffer an omitted event behind a pending Assistant attempt', () => {
+    const source: SessionFormatArtifact = {
+      header: {
+        version: 1,
+        id: 'v1-ignorable-pending',
+        createdAt: 1,
+        isSeeded: false,
+        delegationDepth: 0,
+      },
+      inheritedEventCount: 0,
+      events: [
+        event('turn/start', 0, 100, { turn: 1 }),
+        event('step/start', 1, 101, { turn: 1, step: 1 }),
+        event('assistant/chunk', 2, 110, {
+          turn: 1,
+          step: 1,
+          chunk: { type: 'text-delta', index: 0, text: 'partial' },
+        }),
+        { ...event('external/info', 3, 111, { text: 'opaque' }), ignorable: true },
+        event('step/end', 4, 120, { turn: 1, step: 1 }),
+        event('turn/end', 5, 121, { turn: 1, reason: { kind: 'completed' } }),
+      ],
+    }
+
+    expect(migrateV1ToV2(source).events).toStrictEqual([
+      event('turn/start', 0, 100, { turn: 1 }),
+      event('step/start', 1, 101, { turn: 1, step: 1 }),
+      event('assistant/attempt', 2, 110, {
+        turn: 1,
+        step: 1,
+        stream: [{ type: 'text-chunks', time0: 110, index: 0, dt: [], texts: ['partial'] }],
+      }),
+      event('step/end', 3, 120, { turn: 1, step: 1 }),
+      event('turn/end', 4, 121, { turn: 1, reason: { kind: 'completed' } }),
+    ])
+  })
+
+  it('refuses a retained reference to an omitted ignorable event', () => {
+    const source = (events: readonly SessionFormatEvent[]): SessionFormatArtifact => ({
+      header: {
+        version: 1,
+        id: 'v1-omitted-reference',
+        createdAt: 1,
+        isSeeded: false,
+        delegationDepth: 0,
+      },
+      inheritedEventCount: 0,
+      events,
+    })
+    const opaque = { ...event('external/info', 0, 100, { text: 'opaque' }), ignorable: true }
+
+    expect(() => migrateV1ToV2(source([
+      opaque,
+      { ...event('user/message', 1, 101, userMessage), sourceEventSeqs: [0] },
+    ]))).toThrow(/user\/message 1 sources targets ignorable event "external\/info" omitted at seq 0/)
+
+    expect(() => migrateV1ToV2(source([
+      opaque,
+      { ...event('user/message', 1, 101, userMessage), surfaceOp: { op: 'replace', start: 0, end: 0 } },
+    ]))).toThrow(/user\/message 1 surface start targets ignorable event "external\/info" omitted at seq 0/)
+
+    expect(() => migrateV1ToV2(source([
+      opaque,
+      event('command/run', 1, 101, { commandId: 'command-1', name: 'inspect', source: { kind: 'user' } }),
+      event('command/done', 2, 102, { commandId: 'command-1', kind: 'success', sourceEventSeq: 0 }),
+    ]))).toThrow(/command\/done 2 sourceEventSeq targets ignorable event "external\/info" omitted at seq 0/)
+  })
+
+  it('refuses an unknown v1 event without a true ignorable marker', () => {
+    const source = (candidate: SessionFormatEvent, id: string): SessionFormatArtifact => ({
+      header: {
+        version: 1, id, createdAt: 1, isSeeded: false, delegationDepth: 0,
+      },
+      inheritedEventCount: 0,
+      events: [candidate],
+    })
+
+    expect(() => migrateV1ToV2(source(
+      event('external/info', 0, 100, { text: 'opaque' }),
+      'v1-unknown',
+    ))).toThrow(/format v1 contains unknown event type "external\/info" at seq 0/)
+    expect(() => migrateV1ToV2(source({
+      ...event('external/info', 0, 100, { text: 'opaque' }), ignorable: false,
+    }, 'v1-unknown-false'))).toThrow(/format v1 contains unknown event type "external\/info" at seq 0/)
+  })
+
+  it.each([
+    ['a non-string type', { type: 42, seq: 0, time: 1, data: {}, ignorable: true }, /unknown event type 42 at seq 0/],
+    ['a missing data payload', { type: 'external/info', seq: 0, time: 1, ignorable: true }, /lacks an object data payload/],
+    ['a null data payload', { type: 'external/info', seq: 0, time: 1, data: null, ignorable: true }, /lacks an object data payload/],
+    ['an array data payload', { type: 'external/info', seq: 0, time: 1, data: [], ignorable: true }, /lacks an object data payload/],
+    ['a non-integer seq', { type: 'external/info', seq: 0.5, time: 1, data: {}, ignorable: true }, /non-integer seq 0\.5/],
+    ['a non-integer time', { type: 'external/info', seq: 0, data: {}, ignorable: true }, /non-integer time/],
+  ] as ReadonlyArray<readonly [string, unknown, RegExp]>)(
+    'refuses an ignorable unknown v1 event with %s',
+    (_name, candidate, expected) => {
+      const { stage, output } = stageHarness({ sourceKind: 'transformed' })
+      expect(() => { stage.transformEvent(candidate as SessionFormatEvent, output) }).toThrow(expected)
+    },
+  )
+
+  it('keeps the inherited cut independent of an omitted ignorable event', () => {
+    const atCut = stageHarness({ seeded: true, sourceCut: 1 })
+    atCut.stage.transformEvent(event('feedback/record', 0, 5, { text: 'inherited' }), atCut.output)
+    atCut.stage.transformEvent({ ...event('external/info', 1, 9, { text: 'opaque' }), ignorable: true }, atCut.output)
+    expect(atCut.stage.finish(atCut.output)).toBe(1)
+    expect(atCut.output.values).toStrictEqual([
+      event('feedback/record', 0, 5, { text: 'inherited' }),
+      event('session/end-seed', 1, 5, { inherited: true }),
+    ])
+
+    const beforeCut = stageHarness({ seeded: true, sourceCut: 2 })
+    beforeCut.stage.transformEvent(event('feedback/record', 0, 5, { text: 'inherited' }), beforeCut.output)
+    beforeCut.stage.transformEvent({ ...event('external/info', 1, 9, { text: 'opaque' }), ignorable: true }, beforeCut.output)
+    beforeCut.stage.transformEvent(event('feedback/record', 2, 6, { text: 'own' }), beforeCut.output)
+    expect(beforeCut.stage.finish(beforeCut.output)).toBe(1)
+    expect(beforeCut.output.values).toStrictEqual([
+      event('feedback/record', 0, 5, { text: 'inherited' }),
+      event('session/end-seed', 1, 6, { inherited: true }),
+      event('feedback/record', 2, 6, { text: 'own' }),
+    ])
+
+    const split = stageHarness({ seeded: true, sourceCut: 2 })
+    split.stage.transformEvent(event('assistant/chunk', 1, 5, {
+      turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'inherited' },
+    }), split.output)
+    split.stage.transformEvent({ ...event('external/info', 2, 6, { text: 'opaque' }), ignorable: true }, split.output)
+    expect(() => {
+      split.stage.transformEvent(event('assistant/chunk', 3, 7, {
+        turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'own' },
+      }), split.output)
+    }).toThrow(/cut 2 splits one Assistant attempt/)
   })
 
   it.each([undefined, []] as const)(

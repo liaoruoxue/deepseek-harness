@@ -4,8 +4,9 @@ import { createHash } from 'node:crypto'
 import { SessionFormatError, SessionFormatUnsupportedMigrationError, defineSessionFormatMigration, sessionFormatCount } from '@deepseek-ai/dsh-session-format'
 import type { SessionFormatEvent, SessionFormatEventRun, SessionFormatJsonObject, SessionFormatJsonValue, SessionFormatMigrationContext, SessionFormatMigrationStage, SessionFormatMigrationStageInput } from '@deepseek-ai/dsh-session-format'
 import { assertReleasedV2Header } from '@deepseek-ai/dsh-session-format-v1-to-v2'
-import { assertEvent, canonicalizeTransformedEvent, record, SURFACE_TYPES } from './payload.ts'
+import { assertEvent, canonicalizeTransformedEvent, isClassifiedV2Event, record, SURFACE_TYPES } from './payload.ts'
 import { remapEvent } from './references.ts'
+import type { OmittedSourceEvent } from './references.ts'
 import { assertReleasedV3Header } from './validation.ts'
 
 /** Promote system prompts, remap audited references, and canonicalize envelopes and PTC vocabulary. */
@@ -23,7 +24,7 @@ export const sessionFormatV2ToV3 = defineSessionFormatMigration({
 
 class ReleasedV2ToV3Stage implements SessionFormatMigrationStage {
   readonly headerInheritedEventCount?: number
-  private readonly mapping: number[] = []
+  private readonly mapping: (number | OmittedSourceEvent)[] = []
   private readonly originalIds = new Set<string>()
   private readonly generatedIds = new Set<string>()
   private targetSeq = 0
@@ -44,6 +45,11 @@ class ReleasedV2ToV3Stage implements SessionFormatMigrationStage {
   transformEvent(event: SessionFormatEvent, context: SessionFormatMigrationContext): void {
     if (event.seq !== this.mapping.length) throw new SessionFormatError('format v2 source events must be dense')
     assertEvent(event, 2)
+    if (!isClassifiedV2Event(event.type)) {
+      // The target has no vocabulary for this event, and its opaque payload may cite source positions this edge cannot remap.
+      this.mapping.push({ omittedType: event.type })
+      return
+    }
     this.observeMessageIds(event)
     let source = event
     const data = record(event.data, event.type)

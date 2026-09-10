@@ -48,11 +48,11 @@ function ptcRow(type: string): SessionFormatJsonObject {
 }
 
 const migrationRefusals = [
-  ...['tool/ptc-dispatch-start', 'tool/ptc-dispatch'].flatMap(type => [false, true].map(ignorable => ({
-    name: type + (ignorable ? ' (ignorable)' : ' (required)'),
-    tail: { ...ptcRow(type), ...(ignorable ? { ignorable: true } : {}) },
+  ...['tool/ptc-dispatch-start', 'tool/ptc-dispatch'].map(type => ({
+    name: type + ' (required)',
+    tail: ptcRow(type),
     diagnostic: 'format v2 to v3 cannot safely transform unclassified event ' + type,
-  }))),
+  })),
   {
     name: 'delivery activation claiming V3',
     tail: { type: 'session-log-deepseek/delivery-accepted', data: {
@@ -166,6 +166,23 @@ describe.each(modes)('EOF migration refusal ($compression, $access)', ({ compres
           .rejects.toMatchObject({ code: 'ENOENT' })
       }
     }
+  })
+
+  it.each(['tool/ptc-dispatch-start', 'tool/ptc-dispatch'])('omits an ignorable reserved V3 tag %s without promoting it', async (type) => {
+    const path = await store(2, compression, [...prefix, { ...ptcRow(type), ignorable: true }])
+    const original = await observe(path)
+    const ctx = await mount(compression)
+    const opened = await ctx.sessionPersistence.open(id, access)
+    try {
+      expect(opened.header.version).toBe(3)
+      const restored = await opened.read()
+      expect(restored.events.some(event => event.type === type)).toBe(false)
+    } finally {
+      await opened.close()
+    }
+    expect(await observe(path)).toEqual(original)
+    const targetPath = generationLogPath(root, undefined, id, 3, compression)
+    await expectOnlyGenerations(access === 'write' ? [path, targetPath] : [path])
   })
 
   it.each(nativeRefusals)('refuses native V3 $name instead of falling back to readable V2', async ({ tail, diagnostic }) => {

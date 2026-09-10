@@ -25,7 +25,9 @@ export function assertReleasedV0SourceArtifact(artifact: SessionFormatArtifact):
 export function assertNormalizedReleasedV0Artifact(artifact: SessionFormatArtifact): void {
   assertReleasedSessionFormatHeader(artifact.header, 0)
   assertReleasedArtifactCoordinates(artifact, false, RELEASED_V0_EVENT_TYPE_SET, false, true)
-  for (const event of artifact.events) assertReleasedEventPayload(event, 0)
+  for (const event of artifact.events) {
+    if (RELEASED_V0_EVENT_DISPOSITIONS[event.type] !== undefined) assertReleasedEventPayload(event, 0)
+  }
   assertReleasedArtifactRelationships(artifact, { legacyInterruptedTurnRestart: true })
 }
 

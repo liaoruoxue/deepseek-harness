@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createSessionFormatCatalog, SessionFormatEventCollector } from '@deepseek-ai/dsh-session-format'
+import { createSessionFormatCatalog, SessionFormatEventCollector, SessionFormatUnsupportedMigrationError } from '@deepseek-ai/dsh-session-format'
 import type { SessionFormatArtifact, SessionFormatEvent, SessionFormatHeader, SessionFormatJsonObject } from '@deepseek-ai/dsh-session-format'
 import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec, sessionFormatV0ToV1 } from '@deepseek-ai/dsh-session-format-v0-to-v1'
 import { sessionFormatV1ToV2 } from '@deepseek-ai/dsh-session-format-v1-to-v2'
@@ -208,7 +208,7 @@ describe('streaming V2 system prompt migration', () => {
     expect(requests(output.events, 3)).toEqual(requests(source, 2))
   })
 
-  it.each([event('external/opaque', { seq: 1 }), { ...event('external/opaque', {}), ignorable: true }, event('request/header', { ...request(), futureRef: 0 }), event('user/message', { ...user(), source: { kind: 'future', seq: 0 } }, 'append')])('rejects unaudited payloads %j', (bad) => {
+  it.each([event('external/opaque', { seq: 1 }), event('request/header', { ...request(), futureRef: 0 }), event('user/message', { ...user(), source: { kind: 'future', seq: 0 } }, 'append')])('rejects unaudited payloads %j', (bad) => {
     expect(() => migrate([...opening(), bad])).toThrow(/unclassified|unexpected/)
   })
 
@@ -260,6 +260,89 @@ describe('streaming V2 system prompt migration', () => {
     expect(migrate([...opening(), feedback]).events.at(-1)?.data).toEqual(feedback.data)
     const bad = { ...feedback, data: { ...feedback.data as SessionFormatJsonObject, seq: 2 } }
     expect(() => migrate([...opening(), bad])).toThrow(/unexpected/)
+  })
+})
+
+describe('omitted ignorable historical events', () => {
+  const omitted = (data: SessionFormatEvent['data']) => ({ ...event('external/future', data), ignorable: true })
+
+  it('omits an explicitly ignorable unclassified event and keeps target coordinates dense', () => {
+    const input = dense([
+      ...opening(),
+      event('user/message', user('human'), 'append'),
+      omitted({ opaque: ['ignored'] }),
+      event('step/end', { turn: 1, step: 1 }),
+    ])
+    const target = migrate(input)
+    expect(target.events.map(entry => [entry.type, entry.seq])).toEqual([
+      ['turn/start', 0], ['step/start', 1], ['system/message', 2], ['user/message', 3], ['step/end', 4],
+    ])
+    expect(target.events.find(entry => entry.type === 'user/message')?.data).toEqual(user('human'))
+    expect(target.events.some(entry => entry.type === 'external/future')).toBe(false)
+  })
+
+  it('leaves the generated system head and step tracking untouched by an omitted event', () => {
+    const input = dense([
+      ...opening(),
+      omitted({ opaque: true }),
+      event('request/header', request('prompt')),
+      event('step/end', { turn: 1, step: 1 }),
+    ])
+    const target = migrate(input)
+    expect(target.events.filter(entry => entry.type === 'system/message').map(entry => ({
+      seq: entry.seq,
+      turn: (entry.data as SessionFormatJsonObject)['turn'],
+      step: (entry.data as SessionFormatJsonObject)['step'],
+      surfaceOp: entry['surfaceOp'],
+      sourceEventSeqs: entry['sourceEventSeqs'],
+    }))).toEqual([
+      { seq: 2, turn: 1, step: 1, surfaceOp: 'append', sourceEventSeqs: undefined },
+      { seq: 3, turn: 1, step: 1, surfaceOp: { op: 'replace', startSeq: 2, endSeq: 2 }, sourceEventSeqs: [2] },
+    ])
+    expect(target.events.filter(entry => entry.type !== 'system/message').map(entry => [entry.type, entry.seq])).toEqual([
+      ['turn/start', 0], ['step/start', 1], ['request/header', 4], ['step/end', 5],
+    ])
+  })
+
+  it('keeps the inherited cut independent of an omitted event inside the prefix', () => {
+    const source = { ...header, isSeeded: true, parentSession: 'parent' }
+    const input = dense([
+      ...opening(),
+      omitted({ opaque: true }),
+      event('session/end-seed', { inherited: true }),
+      event('feedback/record', { text: 'own' }),
+    ])
+    const target = migrate(input, source, 3)
+    expect(target.inheritedEventCount).toBe(3)
+    expect(target.events.map(entry => [entry.type, entry.seq])).toEqual([
+      ['turn/start', 0], ['step/start', 1], ['system/message', 2], ['session/end-seed', 3], ['feedback/record', 4],
+    ])
+  })
+
+  it('refuses a retained reference to an omitted event instead of remapping to a wrong coordinate', () => {
+    const logOnly = dense([
+      ...opening(),
+      omitted({ opaque: true }),
+      event('command/run', { commandId: 'cmd', name: 'recall', source: { kind: 'user' } }),
+      event('command/done', { commandId: 'cmd', kind: 'success', sourceEventSeq: 2 }),
+    ])
+    expect(() => migrate(logOnly)).toThrow(SessionFormatUnsupportedMigrationError)
+    expect(() => migrate(logOnly)).toThrow('command/done 4 sourceEventSeq targets ignorable event "external/future" omitted at seq 2')
+    const surface = dense([
+      ...opening(),
+      omitted({ opaque: true }),
+      { ...event('user/message', user('human'), 'append'), sourceEventSeqs: [2] },
+    ])
+    expect(() => migrate(surface)).toThrow('user/message 3 sources targets ignorable event "external/future" omitted at seq 2')
+  })
+
+  it.each([
+    ['unknown type without the marker', event('external/future', { opaque: true }), /unclassified event external\/future/],
+    ['non-string type', { type: false, seq: 0, time: 42, data: {} }, /unclassified event false/],
+    ['false ignorable marker', { ...event('external/future', { opaque: true }), ignorable: false }, /unclassified event external\/future/],
+    ['non-object data', { ...event('external/future', null), ignorable: true }, /external\/future data must be an object/],
+  ] satisfies [string, SessionFormatJsonObject, RegExp][])('still refuses %s', (_name, bad, message) => {
+    expect(() => migrate([...opening(), bad as SessionFormatEvent])).toThrow(message)
   })
 })
 
@@ -406,15 +489,17 @@ describe('composed V3 system and PTC migration', () => {
     expect(title['system']).toBe('tools-code-mode')
   })
 
-  it.each(['decoded', 'transformed'] as const)('refuses both required and ignorable reserved PTC tags in %s sources', (sourceKind) => {
+  it.each(['decoded', 'transformed'] as const)('refuses required reserved PTC tags and omits ignorable ones in %s sources', (sourceKind) => {
     for (const type of ['tool/ptc-dispatch-start', 'tool/ptc-dispatch']) {
-      for (const ignorable of [false, true]) {
-        const value = sessionFormatV2ToV3.createStage({
-          sourceHeader: header, targetHeader: { ...header, version: 3 }, sourceInheritedEventCount: 0, sourceKind,
-        })
-        expect(() => { value.transformEvent(event(type, null, undefined), new SessionFormatEventCollector()) }).toThrow(/unclassified/)
-        expect(() => migrate([{ ...event(type, null), ...(ignorable ? { ignorable: true } : {}) }])).toThrow(/unclassified/)
-      }
+      const value = sessionFormatV2ToV3.createStage({
+        sourceHeader: header, targetHeader: { ...header, version: 3 }, sourceInheritedEventCount: 0, sourceKind,
+      })
+      expect(() => { value.transformEvent(event(type, null, undefined), new SessionFormatEventCollector()) }).toThrow(/unclassified/)
+      expect(() => migrate([event(type, null, undefined)])).toThrow(/unclassified/)
+      // The ignorable marker admits the envelope, so the opaque payload rule is what refuses a null body.
+      expect(() => migrate([{ ...event(type, null, undefined), ignorable: true }])).toThrow(/data must be an object/)
+      expect(migrate([{ ...event(type, { opaque: true }), ignorable: true }, ...opening()]).events.map(row => row.type))
+        .toEqual(['turn/start', 'step/start', 'system/message'])
     }
   })
 

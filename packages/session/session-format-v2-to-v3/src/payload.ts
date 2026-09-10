@@ -35,7 +35,19 @@ export function keys(value: SessionFormatJsonObject, required: readonly string[]
 }
 
 /**
+ * Report whether an event type belongs to the released V2 inventory this edge classifies.
+ * @param type - decoded event type.
+ * @returns whether the type carries an audited payload disposition or a natively handled feedback payload.
+ */
+export function isClassifiedV2Event(type: string): boolean {
+  return RELEASED_V2_EVENT_DISPOSITIONS[type] !== undefined
+    || type === 'feedback/message-put' || type === 'feedback/message-delete'
+}
+
+/**
  * Validate classified payloads before migration, or native V3 system/header payloads.
+ * An unclassified event is admitted only when its producer marked the envelope ignorable.
+ * Its payload stays opaque, so the migration omits the event rather than copying it.
  * @param event - decoded logical event.
  * @param version - source or target generation.
  */
@@ -44,11 +56,12 @@ export function assertEvent(event: SessionFormatEvent, version: 2 | 3): void {
     assertV3Event(event)
     return
   }
+  if (!isClassifiedV2Event(event.type)) {
+    assertUnclassifiedV2Envelope(event)
+    return
+  }
   const disposition = RELEASED_V2_EVENT_DISPOSITIONS[event.type]
   const feedback = event.type === 'feedback/message-put' || event.type === 'feedback/message-delete'
-  if (disposition === undefined && !feedback) {
-    throw new SessionFormatUnsupportedMigrationError('format v2 to v3 cannot safely transform unclassified event ' + event.type)
-  }
   const surface = SURFACE_TYPES.has(event.type)
   keys(event, ['type', 'seq', 'time', 'data'], surface ? ['ignorable', 'sourceEventSeqs', 'surfaceOp'] : ['ignorable'], event.type)
   sessionFormatCount(event.seq, 'event seq')
@@ -91,6 +104,21 @@ export function assertEvent(event: SessionFormatEvent, version: 2 | 3): void {
     const messages = data[event.type === 'agent/inbox/spliced' ? 'inserted' : 'messages']
     for (const message of messages as readonly SessionFormatJsonObject[]) assertSource(message)
   }
+}
+
+/**
+ * Admit one unclassified historical event only through the ignorable marker.
+ * Its envelope is validated exactly as native V3 opaque admission validates one.
+ * @param event - decoded logical event outside the released V2 inventory.
+ */
+function assertUnclassifiedV2Envelope(event: SessionFormatEvent): void {
+  if (typeof event.type !== 'string' || event['ignorable'] !== true) {
+    throw new SessionFormatUnsupportedMigrationError('format v2 to v3 cannot safely transform unclassified event ' + event.type)
+  }
+  keys(event, ['type', 'seq', 'time', 'data'], ['ignorable'], event.type)
+  sessionFormatCount(event.seq, 'event seq')
+  sessionFormatSafeInteger(event.time, 'event time')
+  record(event.data, event.type + ' data')
 }
 
 /**

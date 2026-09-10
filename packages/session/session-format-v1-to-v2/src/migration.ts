@@ -65,6 +65,7 @@ class TransformedReleasedV1ToV2Stage implements SessionFormatMigrationStage {
       sourceHeader: input.sourceHeader,
       sourceCut: sessionFormatCount(input.sourceInheritedEventCount, 'format v1 inherited event count'),
       mapping: new Map(),
+      omitted: new Map(),
       legacyTurns: legacyTurnState(),
       pending: undefined,
       targetSeq: 0,
@@ -114,6 +115,7 @@ interface ReleasedV1ToV2State {
   readonly sourceHeader: SessionFormatHeader
   readonly sourceCut: number
   readonly mapping: Map<number, number>
+  readonly omitted: Map<number, string>
   readonly legacyTurns: LegacyTurnState
   pending: StreamingAttempt | undefined
   targetSeq: number
@@ -128,6 +130,7 @@ function transformReleasedEvent(
 ): void {
   if (event.type === 'assistant/chunk') assertChunkEnvelope(event)
   if (RELEASED_V0_EVENT_DISPOSITIONS[event.type] === undefined) {
+    if (omitIgnorableEvent(state, event)) return
     throw refusal(`format v1 contains unknown event type ${JSON.stringify(event.type)} at seq ${event.seq}`)
   }
   const interrupted = legacyInterruptedTurn(state.legacyTurns, event)
@@ -174,6 +177,25 @@ function assertChunkEnvelope(event: SessionFormatEvent): void {
   if (missing !== undefined) throw refusal(`assistant/chunk ${event.seq} lacks required member ${missing}`)
   if (event.ignorable !== undefined && event.ignorable !== true) {
     throw refusal(`assistant/chunk ${event.seq} ignorable must be true when present`)
+  }
+}
+
+function omitIgnorableEvent(state: ReleasedV1ToV2State, event: SessionFormatEvent): boolean {
+  if (typeof event.type !== 'string' || event['ignorable'] !== true) return false
+  assertOmittedEnvelope(event)
+  state.omitted.set(event.seq, event.type)
+  return true
+}
+
+function assertOmittedEnvelope(event: SessionFormatEvent): void {
+  const label = `ignorable event ${JSON.stringify(event.type)}`
+  if (!Number.isSafeInteger(event.seq)) throw refusal(`${label} has non-integer seq ${JSON.stringify(event.seq)}`)
+  if (!Number.isSafeInteger(event.time)) {
+    throw refusal(`${label} at seq ${event.seq} has non-integer time ${JSON.stringify(event.time)}`)
+  }
+  const data = event.data
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    throw refusal(`${label} at seq ${event.seq} lacks an object data payload`)
   }
 }
 
@@ -333,7 +355,7 @@ function emitSource(
   }
   ensureTargetCut(state, event.seq, event.time, source.type, context)
   state.mapping.set(event.seq, state.targetSeq)
-  context.emitEvent(remapReferences(source, state.targetSeq, state.mapping))
+  context.emitEvent(remapReferences(source, state.targetSeq, state))
   state.targetSeq += 1
 }
 
@@ -344,7 +366,7 @@ function emitGenerated(
   context: SessionFormatMigrationContext,
 ): void {
   ensureTargetCut(state, origin, event.time, event.type, context)
-  context.emitEvent(remapReferences(event, state.targetSeq, state.mapping))
+  context.emitEvent(remapReferences(event, state.targetSeq, state))
   state.targetSeq += 1
 }
 
@@ -566,7 +588,7 @@ function attemptEvent(group: AttemptGroup): SessionFormatEvent {
 function remapReferences(
   source: SessionFormatEvent,
   targetSeq: number,
-  mapping: ReadonlyMap<number, number>,
+  state: ReleasedV1ToV2State,
 ): SessionFormatEvent {
   const { sourceEventSeqs, surfaceOp, ...event } = source
   const sources = sourceEventSeqs === undefined
@@ -574,7 +596,7 @@ function remapReferences(
     : {
       sourceEventSeqs: mapList(
         numberArray(sourceEventSeqs),
-        mapping,
+        state,
         `${source.type} ${source.seq} sources`,
       ),
     }
@@ -585,12 +607,12 @@ function remapReferences(
       op: 'replace',
       start: mapOne(
         coordinate(replacement['start']),
-        mapping,
+        state,
         `${source.type} ${source.seq} surface start`,
       ),
       end: mapOne(
         coordinate(replacement['end']),
-        mapping,
+        state,
         `${source.type} ${source.seq} surface end`,
       ),
     }
@@ -598,7 +620,7 @@ function remapReferences(
   return {
     ...event,
     seq: targetSeq,
-    data: remapPayloadReferences(source, mapping),
+    data: remapPayloadReferences(source, state),
     ...sources,
     ...(operation === undefined ? {} : { surfaceOp: operation }),
   }
@@ -606,7 +628,7 @@ function remapReferences(
 
 function remapPayloadReferences(
   event: SessionFormatEvent,
-  mapping: ReadonlyMap<number, number>,
+  state: ReleasedV1ToV2State,
 ): SessionFormatJsonValue {
   const data = record(event.data)
   switch (event.type) {
@@ -617,7 +639,7 @@ function remapPayloadReferences(
           ...data,
           sourceEventSeq: mapOne(
             coordinate(data['sourceEventSeq']),
-            mapping,
+            state,
             `command/done ${event.seq} sourceEventSeq`,
           ),
         }
@@ -629,18 +651,18 @@ function remapPayloadReferences(
         shadowedRange: {
           start: mapOne(
             coordinate(range['start']),
-            mapping,
+            state,
             `${event.type} ${event.seq} shadowedRange start`,
           ),
           end: mapOne(
             coordinate(range['end']),
-            mapping,
+            state,
             `${event.type} ${event.seq} shadowedRange end`,
           ),
         },
         shadowedSeqs: mapList(
           numberArray(data['shadowedSeqs'] as SessionFormatJsonValue),
-          mapping,
+          state,
           `${event.type} ${event.seq} shadowedSeqs`,
         ),
       }
@@ -651,7 +673,7 @@ function remapPayloadReferences(
         ...data,
         messageSeqs: mapList(
           numberArray(data['messageSeqs'] as SessionFormatJsonValue),
-          mapping,
+          state,
           `${event.type} ${event.seq} messageSeqs`,
         ),
       }
@@ -662,18 +684,22 @@ function remapPayloadReferences(
 
 function mapList(
   values: readonly number[],
-  mapping: ReadonlyMap<number, number>,
+  state: ReleasedV1ToV2State,
   label: string,
 ): number[] {
-  return values.map(value => mapOne(value, mapping, label))
+  return values.map(value => mapOne(value, state, label))
 }
 
 function mapOne(
   value: number,
-  mapping: ReadonlyMap<number, number>,
+  state: ReleasedV1ToV2State,
   label: string,
 ): number {
-  const mapped = mapping.get(value)
+  const omitted = state.omitted.get(value)
+  if (omitted !== undefined) {
+    throw refusal(`${label} targets ignorable event ${JSON.stringify(omitted)} omitted at seq ${value}`)
+  }
+  const mapped = state.mapping.get(value)
   if (mapped === undefined) throw refusal(`${label} targets consumed assistant/chunk ${value}`)
   return mapped
 }

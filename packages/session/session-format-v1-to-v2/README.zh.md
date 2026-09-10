@@ -103,7 +103,7 @@ v2 物理 header 要求 `isSeeded`，且不存储数值切点。编解码器从�
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **封闭的第一方源清单**——未知 v1 事件会使迁移失败，包括带有 `ignorable: true` 的事件。
+- **省略可忽略的源扩展**——带有 `ignorable: true` 的未知 v1 事件会从目标中省略；没有该标记时会使迁移失败；若保留下来的事件引用了被省略的序号，同样会被拒绝。
 - **线性重映射状态**——流式处理不保留完整 v1 事件数组，但最终 v2 事件数组和旧到新序号映射仍为 O(事件数)。
 - **不负责发布或兼容回退**——持久化拥有排他 successor 发布，保留的 v1 generation 不是自动 downgrade 或 restore 输入。
 

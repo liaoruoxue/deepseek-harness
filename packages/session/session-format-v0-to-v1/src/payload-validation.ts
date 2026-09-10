@@ -289,7 +289,7 @@ export function assertReleasedPayloadSemantics(event: SessionFormatEvent, versio
       nonEmptyString(data['apiVersion'], `${label} apiVersion`)
       deepSeekSearchBodyValue(data['body'], `${label} body`)
       return
-    /* v8 ignore next -- the frozen disposition rejects unknown types before semantic dispatch. */
+    /* v8 ignore next -- assertReleasedEventPayload admits only the frozen inventory to semantic dispatch. */
     default:
       throw new SessionFormatError(`released payload validator is missing event ${JSON.stringify(event.type)}`)
   }

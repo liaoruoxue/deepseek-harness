@@ -292,7 +292,8 @@ describe('native V3 opaque event preservation', () => {
           const before = JSON.stringify(value)
           expect(restore(value)).toBe(value)
           expect(JSON.stringify(value)).toBe(before)
-          expect(() => migrate([source])).toThrow(type === 'external/future' ? /cannot safely transform unclassified event/ : /unexpected field sourceEventSeqs/)
+          // Ignorable unknown events are admitted opaquely, so their surface metadata is what migration refuses.
+          expect(() => migrate([source])).toThrow(/unexpected field sourceEventSeqs/)
         }
       }
     },

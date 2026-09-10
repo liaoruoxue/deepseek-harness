@@ -75,6 +75,6 @@ Agent-loop 测试固定先持久后 end 的顺序、中断的可见前缀、失�
 
 v1 的顶层 chunk 可能在 attempt 结束前由带缓冲的持久化 writer 刷盘；与之不同，v2 在 settlement 之前没有持久 attempt 证据。如果进程或主机在 settlement 前硬中断，完整的 in-flight stream 都会丢失；`agent/assistant-stream` 不是 write-ahead log。这项取舍避免为实时输出增加第二个持久性 owner。
 
-一个 settlement 可能很大，v1 到 v2 迁移会物化完整产物及其序号映射。封闭的 Alpha 清单会拒绝未知 v1 事件与未声明引用，而不会猜测。需要单独 chunk 的消费方调用 `expandAssistantStream()`，并且绝不能从 `agent/assistant-stream` 推断持久性。
+一个 settlement 可能很大，v1 到 v2 迁移会物化完整产物及其序号映射。封闭的 Alpha 清单会省略标记了 `ignorable: true` 的未知 v1 事件，拒绝没有该标记的未知 v1 事件，并拒绝未声明引用，而不会猜测。需要单独 chunk 的消费方调用 `expandAssistantStream()`，并且绝不能从 `agent/assistant-stream` 推断持久性。
 
 迁移会改变被消费 v1 chunk 之后的序号，因此每个同 Session 引用都必须属于显式改写规则。该约束有意让未来的基数变化迁移保持昂贵，并防止格式链执行无声的语义重定向。

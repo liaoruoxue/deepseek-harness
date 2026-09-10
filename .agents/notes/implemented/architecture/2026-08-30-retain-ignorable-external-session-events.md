@@ -16,7 +16,7 @@ The canonical `SessionEvent` envelope retains `ignorable?: true`, and every repr
 
 The field is removable only after a replacement supports the current third-party plugin across event production, persistence, reload, and transport, with an explicit cutover for sessions already containing the marker. The [session log versioning decision](2026-08-10-session-log-version-mechanism.md) continues to own the default-required safety rule and format-version policy.
 
-Historical format migration is deliberately stricter in the alpha implementation. The v0-to-v1 edge refuses every unknown v0 type, including an ignorable one, because an opaque payload may contain references that a format edge cannot validate. The [alpha historical-event decision](2026-08-31-alpha-historical-unknown-event-refusal.md) owns that bounded exception; equal-version append and reload continue to follow this note.
+Historical format migration applies the producer's marker at each rewriting edge: the v0-to-v1 identity edge admits a marked ignorable event unchanged, while the position-rewriting v1-to-v2 and v2-to-v3 edges omit it and refuse a retained event that references an omitted sequence number; an unmarked unknown type refuses. [Historical migration omits explicitly ignorable unknown events](2026-09-10-historical-migration-omits-ignorable-events.md) owns that policy; equal-version append and reload continue to follow this note.
 
 ## Alternatives considered
 

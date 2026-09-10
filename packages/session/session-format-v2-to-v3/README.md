@@ -98,7 +98,7 @@ The exact event tags `tool/code-dispatch-start` and `tool/code-dispatch` become 
 - `agent/inbox/spliced.data.inserted[].source.plugin`
 - `session/title-llm-request.data.messages[].source.plugin`
 
-Similar plugin names, other source kinds, arbitrary text, nested JSON, and historical ids including `:code:` remain unchanged. This does not rename `run_code` or its `code` argument. V2 source events already using either reserved V3 PTC tag are refused even when ignorable; an opaque source extension must not acquire current lifecycle meaning through migration.
+Similar plugin names, other source kinds, arbitrary text, nested JSON, and historical ids including `:code:` remain unchanged. This does not rename `run_code` or its `code` argument. V2 source events already using either reserved V3 PTC tag are refused unless the envelope carries `ignorable: true`, in which case the edge omits them; an opaque source extension must not acquire current lifecycle meaning through migration.
 
 <a id="canonical-envelopes"></a>
 ### Canonical envelopes and tool errors
@@ -117,7 +117,7 @@ A V2 `session-log-deepseek/delivery-accepted` with `data.sessionFormatVersion ==
 <a id="source-audit"></a>
 ### Source audit and refusal
 
-Migration classifies the [released V2 event inventory](../session-format-v1-to-v2/src/dispositions.ts), including log-only `assistant/attempt`, plus `feedback/message-put` and `feedback/message-delete`. The [payload validator](src/payload.ts) applies exact admitted envelope and payload members and released nested validation. Unknown events, even ignorable ones, and unaudited members at checked records are refused. Message-source classification covers the five Message slots below: unknown source kinds are refused, while agent relay attribution is admitted without interpreting ids as Session references.
+Migration classifies the [released V2 event inventory](../session-format-v1-to-v2/src/dispositions.ts), including log-only `assistant/attempt`, plus `feedback/message-put` and `feedback/message-delete`. The [payload validator](src/payload.ts) applies exact admitted envelope and payload members and released nested validation. Unknown events are refused unless the envelope carries `ignorable: true`, in which case the edge omits them, and a retained event that references an omitted source sequence is refused. Unaudited members at checked records are refused. Message-source classification covers the five Message slots below: unknown source kinds are refused, while agent relay attribution is admitted without interpreting ids as Session references.
 
 The content audit admits exactly `text`, `reasoning`, `image`, `file`, `tool-call`, and `tool-result`. It validates owned block fields and recursively audits every nested `tool-result.content` in this finite set of positions:
 
