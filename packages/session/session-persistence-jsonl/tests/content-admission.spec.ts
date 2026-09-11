@@ -14,7 +14,8 @@ import { compressZstdFrame, decompressZstdFrame, scanZstdFrames } from '../src/z
 
 const id = SessionId('content-admission')
 const text = { type: 'text', text: 'Keep tool/code-dispatch and tools-code-mode literal. 图片' }
-const unknown = { type: 'future-block', seq: 2, text: 'Do not discard this content.' }
+// A non-string kind is malformed; the kind audit refuses it while plugin-declared string kinds stay opaque.
+const malformed = { type: 12, seq: 2, text: 'Do not discard this content.' }
 const prefix: readonly (SessionFormatJsonObject & { readonly type: string })[] = [
   { type: 'turn/start', data: { turn: 1 } },
   { type: 'step/start', data: { turn: 1, step: 1 } },
@@ -168,7 +169,7 @@ const modes = (['none', 'zstd'] as const).flatMap(compression =>
 
 describe.each(modes)('V2 content EOF refusal ($compression, $access)', ({ compression, access }) => {
   it.each(carriers)('refuses $name without source mutation or prefix publication', async (carrier) => {
-    const rows = carrier.rows(unknown)
+    const rows = carrier.rows(malformed)
     const tail = rows.at(-1)!
     const path = await store(compression, rows)
     const original = await observe(path)
@@ -179,7 +180,7 @@ describe.each(modes)('V2 content EOF refusal ($compression, $access)', ({ compre
     await expect(opened).rejects.toBeInstanceOf(SessionFormatUnsupportedError)
     await expect(opened).rejects.toMatchObject({
       message: 'format v2 ' + tail['type'] + ' at seq ' + String(rows.length - 1) + ' '
-        + carrier.path + ': cannot safely transform unclassified message content kind "future-block"'
+        + carrier.path + ': message content kind must be a non-empty string; received 12'
         + '; source v2 artifact remains unchanged (raw log: ' + path + ')',
       location: { kind: 'jsonl', path },
     })

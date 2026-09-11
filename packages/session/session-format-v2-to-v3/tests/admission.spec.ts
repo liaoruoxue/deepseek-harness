@@ -52,10 +52,12 @@ describe('durable V3 admission failures', () => {
     expect(releasedV3SessionFormatCodec.decodeHeader({ type: 'session', ...header, version: 3 })).toEqual({ ...header, version: 3 })
   })
 
-  it('retains native source extensions through payload validation without classifying their references', () => {
+  it('preserves a plugin-declared source kind as owner-opaque JSON at both target and source admission', () => {
     const extension = event('user/message', { ...user, source: { kind: 'custom-source', localRef: 77 } }, { surfaceOp: 'append' })
     expect(() =>{  assertEvent(extension, 3) }).not.toThrow()
-    expect(() =>{  assertEvent(extension, 2) }).toThrow(/unclassified/)
+    expect(() =>{  assertEvent(extension, 2) }).not.toThrow()
+    expect(() =>{  assertEvent(event('user/message', { ...user, source: { kind: 77 } }, { surfaceOp: 'append' }), 2) })
+      .toThrow('format v2 user/message at seq 0 data.source: message source kind must be a non-empty string; received 77')
   })
 
   it.each([0, -1, 1.5])('rejects invalid system step coordinates %s', (step) => {

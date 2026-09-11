@@ -117,9 +117,9 @@ V2 `session-log-deepseek/delivery-accepted` 若携带 `data.sessionFormatVersion
 <a id="source-audit"></a>
 ### 源审计与拒绝
 
-迁移分类[已发布 V2 事件清单](../session-format-v1-to-v2/src/dispositions.ts)，包括仅日志的 `assistant/attempt`，以及 `feedback/message-put` 和 `feedback/message-delete`。[载荷校验器](src/payload.ts)应用精确的已接纳信封和载荷成员，以及已发布嵌套校验。未知事件（即使可忽略）以及被检查记录中未经审计的成员均被拒绝。消息来源分类覆盖下表的五个消息位置：未知来源种类会被拒绝，agent（智能体）中继归属则被接纳，但标识不会被解释为会话引用。
+迁移分类[已发布 V2 事件清单](../session-format-v1-to-v2/src/dispositions.ts)，包括仅日志的 `assistant/attempt`，以及 `feedback/message-put` 和 `feedback/message-delete`。[载荷校验器](src/payload.ts)应用精确的已接纳信封和载荷成员，以及已发布嵌套校验。未知事件（即使可忽略）以及被检查记录中未经审计的成员均被拒绝。消息来源分类覆盖下表的五个消息位置：已知种类接受其自有校验，未知的非空字符串种类作为所有者不透明 JSON 保留，非字符串或空种类被拒绝；agent（智能体）中继归属则被接纳，但标识不会被解释为会话引用。
 
-内容审计仅接纳 `text`、`reasoning`、`image`、`file`、`tool-call` 和 `tool-result`。它校验归本格式所有的块字段，并在以下有限位置递归审计每层嵌套的 `tool-result.content`：
+内容审计恰好负责 `text`、`reasoning`、`image`、`file`、`tool-call` 和 `tool-result` 的结构校验。它校验已知块字段；未知的非空字符串类型作为所有者不透明 JSON 保留。它在以下有限位置递归审计每层嵌套的 `tool-result.content`：
 
 | 所有者 | 审计内容 |
 |---|---|
@@ -129,7 +129,7 @@ V2 `session-log-deepseek/delivery-accepted` 若携带 `data.sessionFormatVersion
 | PTC 前代输出 | `tool/code-dispatch.data.content` |
 | 内嵌 assistant 流 | `assistant/message.data.stream[]` 和 `assistant/attempt.data.stream[]` 中的原始 `type: 'chunk'` 记录：`block-end` 的 `chunk.block` 和 `block-start` 的 `chunk.blockType`，包括尚无完整块的起始记录 |
 
-所有位置共用同一历史种类集合；未完成的起始记录不能引入未知种类。未知种类和归本格式所有的畸形块都会拒绝整次迁移；目录恢复报告 `SessionFormatUnsupportedMigrationError`。诊断标明源事件类型、源序号、包含索引的完整载荷路径和违反的规则。未知种类错误标明违规种类；已知块的畸形错误标明种类和字段错误。畸形内容容器或缺失块报告其位置，而不虚构种类。拒绝时，持久化保留源字节且不发布后继代。
+所有位置共用同一规则：已知种类接受归本格式所有的结构校验，未知的非空字符串种类不透明保留，非字符串或空种类则拒绝整次迁移；目录恢复报告 `SessionFormatUnsupportedMigrationError`。诊断标明源事件类型、源序号、包含索引的完整载荷路径和违反的规则。畸形种类错误标明收到的值；已知块的畸形错误标明种类和字段错误。畸形内容容器或缺失块报告其位置，而不虚构种类。拒绝时，持久化保留源字节且不发布后继代。
 
 准入不改写内容。特别是，内嵌流虽然接受归本格式所有的块字段检查，其字节仍保持不变。工具参数、`replayState.response` 和 `replayState.blocks` 保持不透明；任意 JSON 内的同名字段不会触发此审计。文件附件元数据接受校验，但标识或字节计数不会被解释为 Session 引用。这不是通用 schema 审计或递归坐标推断，原生 V3 扩展准入与此分开。
 

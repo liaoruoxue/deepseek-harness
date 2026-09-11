@@ -67,6 +67,25 @@ export function assertEvent(event: SessionFormatEvent, version: 2 | 3): void {
   const admitted = disposition as NonNullable<typeof disposition>
   keys(data, admitted.required, admitted.optional, event.type + ' data')
   assertOwnedContent(event, data)
+  // Source classification applies only to Harness messages, not team delivery envelopes.
+  // It precedes released payload semantics so a malformed kind reports the received value.
+  const subject = 'format v2 ' + event.type + ' at seq ' + String(event.seq)
+  if (event.type === 'user/message') assertSource(data, subject + ' data')
+  if (event.type === 'assistant/message' || event.type === 'tool/result') assertSource(record(data['message'], 'message'), subject + ' data.message')
+  if (event.type === 'tool/result' && isSessionFormatJsonObject(data['error']) && data['error']['code'] === 'TOOL_NOT_STARTED') {
+    const message = record(data['message'], 'tool result message')
+    const source = record(message['source'], 'tool result source')
+    if (!isRepairIdentity(message['id'], source['callId'])) {
+      throw new SessionFormatError('TOOL_NOT_STARTED repair requires its canonical historical message id')
+    }
+  }
+  if (event.type === 'agent/inbox/spliced' || event.type === 'session/title-llm-request') {
+    const field = event.type === 'agent/inbox/spliced' ? 'inserted' : 'messages'
+    const messages = data[field]
+    for (const [index, message] of (messages as readonly SessionFormatJsonObject[]).entries()) {
+      assertSource(message, subject + ' data.' + field + '[' + String(index) + ']')
+    }
+  }
   // Assistant attempts are introduced by V2; the V0 helper has no case for them.
   if (event.type !== 'assistant/attempt') assertReleasedPayloadSemantics(event, version)
   if (event.type === 'assistant/message' || event.type === 'assistant/attempt') {
@@ -76,20 +95,6 @@ export function assertEvent(event: SessionFormatEvent, version: 2 | 3): void {
   }
   if (event.type === 'session/end-seed' && data['inherited'] !== undefined && data['inherited'] !== true) {
     throw new SessionFormatError('session/end-seed inherited must be true')
-  }
-  // Source classification applies only to Harness messages, not team delivery envelopes.
-  if (event.type === 'user/message') assertSource(data)
-  if (event.type === 'assistant/message' || event.type === 'tool/result') assertSource(record(data['message'], 'message'))
-  if (event.type === 'tool/result' && isSessionFormatJsonObject(data['error']) && data['error']['code'] === 'TOOL_NOT_STARTED') {
-    const message = record(data['message'], 'tool result message')
-    const source = record(message['source'], 'tool result source')
-    if (!isRepairIdentity(message['id'], source['callId'])) {
-      throw new SessionFormatError('TOOL_NOT_STARTED repair requires its canonical historical message id')
-    }
-  }
-  if (event.type === 'agent/inbox/spliced' || event.type === 'session/title-llm-request') {
-    const messages = data[event.type === 'agent/inbox/spliced' ? 'inserted' : 'messages']
-    for (const message of messages as readonly SessionFormatJsonObject[]) assertSource(message)
   }
 }
 
@@ -107,15 +112,20 @@ export function isRepairIdentity(id: SessionFormatJsonValue | undefined, callId:
   return /^(0|[1-9]\d*)$/.test(suffix) && Number.isSafeInteger(Number(suffix))
 }
 
-function assertSource(message: SessionFormatJsonObject): void {
-  const source = record(message['source'], 'message source')
-  if (typeof source['kind'] !== 'string' || !SOURCE_KINDS.has(source['kind'])) {
-    throw new SessionFormatUnsupportedMigrationError('cannot safely transform unclassified message source')
+function assertSource(message: SessionFormatJsonObject, path: string): void {
+  const source = record(message['source'], path + '.source')
+  const kind = source['kind']
+  // A plugin-declared kind outside the audited set is owner-opaque JSON, matching V0-to-V1 and native V3 admission.
+  if (typeof kind !== 'string' || kind.length === 0) {
+    throw new SessionFormatUnsupportedMigrationError(
+      path + '.source: message source kind must be a non-empty string; received ' + JSON.stringify(kind),
+    )
   }
-  if (source['kind'] === 'agent-message') {
-    keys(source, ['kind', 'form', 'senderSessionId'], [], 'agent-message source')
+  if (!SOURCE_KINDS.has(kind)) return
+  if (kind === 'agent-message') {
+    keys(source, ['kind', 'form', 'senderSessionId'], [], path + '.source kind "agent-message"')
     if (source['form'] !== 'relay' || typeof source['senderSessionId'] !== 'string' || source['senderSessionId'].length === 0) {
-      throw new SessionFormatError('agent-message source requires relay form and senderSessionId')
+      throw new SessionFormatError(path + '.source kind "agent-message": agent-message source requires relay form and senderSessionId')
     }
   }
 }
@@ -166,10 +176,13 @@ function assertOwnedContent(event: SessionFormatEvent, data: SessionFormatJsonOb
   }
 }
 
-function assertContentKind(kind: SessionFormatJsonValue | undefined, label: string): void {
-  if (typeof kind !== 'string' || !CONTENT_KINDS.has(kind)) {
-    throw new SessionFormatUnsupportedMigrationError(label + ': cannot safely transform unclassified message content kind ' + JSON.stringify(kind))
+function assertContentKind(kind: SessionFormatJsonValue | undefined, label: string): boolean {
+  if (typeof kind !== 'string' || kind.length === 0) {
+    throw new SessionFormatUnsupportedMigrationError(
+      label + ': message content kind must be a non-empty string; received ' + JSON.stringify(kind),
+    )
   }
+  return CONTENT_KINDS.has(kind)
 }
 
 function assertContentKinds(content: SessionFormatJsonValue | undefined, label: string): void {
@@ -178,7 +191,8 @@ function assertContentKinds(content: SessionFormatJsonValue | undefined, label: 
 
 function assertContentBlock(value: SessionFormatJsonValue | undefined, label: string): void {
   const block = record(value, label)
-  assertContentKind(block['type'], label)
+  // A plugin-declared block type outside the audited set is owner-opaque JSON, matching V0-to-V1 and native V3 admission.
+  if (!assertContentKind(block['type'], label)) return
   if (block['type'] === 'tool-result') {
     if (!Array.isArray(block['content'])) throw new SessionFormatError(label + '.content: invalid message content kind "tool-result": content must be an array')
     assertContentKinds(block['content'], label + '.content')

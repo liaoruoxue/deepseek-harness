@@ -208,15 +208,14 @@ describe('streaming V2 system prompt migration', () => {
     expect(requests(output.events, 3)).toEqual(requests(source, 2))
   })
 
-  it.each([event('external/opaque', { seq: 1 }), { ...event('external/opaque', {}), ignorable: true }, event('request/header', { ...request(), futureRef: 0 }), event('user/message', { ...user(), source: { kind: 'future', seq: 0 } }, 'append')])('rejects unaudited payloads %j', (bad) => {
-    expect(() => migrate([...opening(), bad])).toThrow(/unclassified|unexpected/)
+  it.each([event('external/opaque', { seq: 1 }), { ...event('external/opaque', {}), ignorable: true }, event('request/header', { ...request(), futureRef: 0 }), event('user/message', { ...user(), source: { kind: 7 } }, 'append')])('rejects unaudited payloads %j', (bad) => {
+    expect(() => migrate([...opening(), bad])).toThrow(/unclassified|unexpected|non-empty string/)
   })
 
-  it('rejects invalid references, future generation claims, and unclassified message content', () => {
+  it('rejects invalid references and future generation claims', () => {
     expect(() => migrate([...opening(), { ...event('user/message', user(), 'append'), sourceEventSeqs: [99] }])).toThrow(/earlier/)
     expect(() => migrate([...opening(), event('system/message', {})])).toThrow(/unclassified/)
     expect(() => migrate([...opening(), event('session-log-deepseek/delivery-accepted', { sessionId: header.id, throughSeq: 1, sessionFormatVersion: 3 })])).toThrow(/format v3|between/)
-    expect(() => migrate([...opening(), event('user/message', { ...user(), content: [{ type: 'future-block', seq: 1 }] }, 'append')])).toThrow(/unclassified message content/)
   })
 
   it('migrates audited agent relay sources and file blocks verbatim, refusing unclassified members', () => {

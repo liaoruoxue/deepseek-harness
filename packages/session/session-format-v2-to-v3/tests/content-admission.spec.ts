@@ -105,7 +105,9 @@ describe('V2 content admission', () => {
   it.each([0, 1] as const)('routes historical V%s queued content through V2 admission', (version) => {
     const good = carriers.find(carrier => carrier.type === 'team/message/queued')!.rows([text])
     expect(catalog([...opening, ...good, ...closing], version).header.version).toBe(3)
-    const bad = carriers.find(carrier => carrier.type === 'team/message/queued')!.rows([nested([future])])
+    const opaque = carriers.find(carrier => carrier.type === 'team/message/queued')!.rows([nested([future])])
+    expect(catalog([...opening, ...opaque, ...closing], version).header.version).toBe(3)
+    const bad = carriers.find(carrier => carrier.type === 'team/message/queued')!.rows([nested([{ type: 'file', attachment: { attachmentId: 'file', name: 'file', bytes: -1 } }])])
     expect(() => catalog([...opening, ...bad, ...closing], version)).toThrow('format v2 team/message/queued at seq 3 data.message.content[0].content[0]')
   })
 
@@ -114,6 +116,9 @@ describe('V2 content admission', () => {
       expect(catalog([...opening, event('assistant/chunk', { turn: 1, step: 1, chunk })], version).header.version).toBe(3)
     }
     for (const chunk of [{ type: 'block-start', index: 987, blockType: 'future-content' }, { type: 'block-end', index: 987, block: nested([future]) }]) {
+      expect(catalog([...opening, event('assistant/chunk', { turn: 1, step: 1, chunk })], version).header.version).toBe(3)
+    }
+    for (const chunk of [{ type: 'block-start', index: 987, blockType: 987 }, { type: 'block-end', index: 987, block: nested([{ type: 'text', text: 12 }]) }]) {
       expect(() => catalog([...opening, event('assistant/chunk', { turn: 1, step: 1, chunk })], version)).toThrow('format v2 assistant/attempt at seq 3 data.stream[0].chunk')
     }
   })
@@ -168,12 +173,19 @@ describe('V2 content admission', () => {
     it.each([null, false, {}, [null], [nested(null)]])('rejects malformed content arrays in ' + carrier.type + ' %j', (content) => {
       expect(() => migrate([...opening, ...carrier.rows(content), ...closing])).toThrow('format v2 ' + carrier.type + ' at seq ' + String(carrier.seq) + ' ' + carrier.path)
     })
-    it.each([false, true])('rejects unknown kind in ' + carrier.type + ' nested=%s', (deep) => {
+    it.each([false, true])('preserves or positionally refuses unknown kind in ' + carrier.type + ' nested=%s', (deep) => {
       const content = deep ? [text, nested([text, nested([future])])] : [future]
-      const path = carrier.path + (deep ? '[1].content[1].content[0]' : '[0]')
-      expect(() => migrate([...opening, ...carrier.rows(content), ...closing])).toThrow(
-        'format v2 ' + carrier.type + ' at seq ' + String(carrier.seq) + ' ' + path + ': cannot safely transform unclassified message content kind "future-content"',
-      )
+      const input = [...opening, ...carrier.rows(content), ...closing]
+      const before = JSON.stringify(input)
+      if (carrier.type === 'session/title-llm-request') {
+        // The framed title request owns exactly one text block; that rule, not the kind whitelist, refuses here.
+        expect(() => restoreReleasedV3Artifact(migrate(input), new Set()))
+          .toThrow('session/title-llm-request messages do not represent messageSeqs')
+        return
+      }
+      const output = migrate(input)
+      expect(restoreReleasedV3Artifact(output, new Set())).toBe(output)
+      expect(JSON.stringify(input)).toBe(before)
     })
   }
 
@@ -185,7 +197,7 @@ describe('V2 content admission', () => {
     })
     it.each([{}, { blockType: null }, { blockType: 1 }, { blockType: '' }])('rejects missing or malformed block-start kind in ' + type + ' %j', (fields) => {
       const stream = [{ type: 'chunk', time: 4, chunk: { type: 'block-start', index: 987, ...fields } }]
-      expect(() => migrate([...opening, assistant(type, stream)])).toThrow('format v2 ' + type + ' at seq 3 data.stream[0].chunk.blockType: cannot safely transform unclassified message content kind')
+      expect(() => migrate([...opening, assistant(type, stream)])).toThrow('format v2 ' + type + ' at seq 3 data.stream[0].chunk.blockType: message content kind must be a non-empty string')
     })
     it.each([null, {}, [null], [{ type: 'chunk' }], [{ type: 'chunk', chunk: [] }], [{ type: 'chunk', chunk: { type: 'block-end' } }]])('narrows owned durable stream containers in ' + type + ' %j', (stream) => {
       expect(() => migrate([...opening, assistant(type, stream)])).toThrow('format v2 ' + type + ' at seq 3 data.stream')
@@ -208,17 +220,22 @@ describe('V2 content admission', () => {
       const output = migrate([...opening, assistant(type, stream), ...closing])
       expect(restoreReleasedV3Artifact(output, new Set())).toBe(output)
     })
-    it.each([false, true])('rejects raw block-end unknown kind in ' + type + ' nested=%s', (deep) => {
+    it.each([false, true])('preserves raw block-end unknown kind in ' + type + ' nested=%s', (deep) => {
       const block = deep ? nested([future]) : future
-      const path = 'data.stream[0].chunk.block' + (deep ? '.content[0]' : '')
-      expect(() => migrate([...opening, assistant(type, [{ type: 'chunk', time: 4, chunk: { type: 'block-end', index: 987, block } }]), ...closing])).toThrow(
-        'format v2 ' + type + ' at seq 3 ' + path + ': cannot safely transform unclassified message content kind "future-content"',
-      )
+      const input = [...opening, assistant(type, [{ type: 'chunk', time: 4, chunk: { type: 'block-end', index: 987, block } }]), ...closing]
+      const before = JSON.stringify(input)
+      const output = migrate(input)
+      expect(restoreReleasedV3Artifact(output, new Set())).toBe(output)
+      expect(output.events.find(row => row.type === type)?.data).toEqual(input[3]!.data)
+      expect(JSON.stringify(input)).toBe(before)
     })
-    it('rejects raw block-start unknown kind without an end in ' + type, () => {
-      expect(() => migrate([...opening, assistant(type, [{ type: 'chunk', time: 4, chunk: { type: 'block-start', index: 987, blockType: 'future-content' } }])])).toThrow(
-        'format v2 ' + type + ' at seq 3 data.stream[0].chunk.blockType: cannot safely transform unclassified message content kind "future-content"',
-      )
+    it('preserves raw block-start unknown kind without an end in ' + type, () => {
+      const input = [...opening, assistant(type, [{ type: 'chunk', time: 4, chunk: { type: 'block-start', index: 987, blockType: 'future-content' } }])]
+      const before = JSON.stringify(input)
+      const output = migrate(input)
+      expect(restoreReleasedV3Artifact(output, new Set())).toBe(output)
+      expect(output.events.find(row => row.type === type)?.data).toEqual(input[3]!.data)
+      expect(JSON.stringify(input)).toBe(before)
     })
   }
 })

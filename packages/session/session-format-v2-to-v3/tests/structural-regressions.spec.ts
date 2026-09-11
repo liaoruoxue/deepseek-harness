@@ -196,12 +196,20 @@ describe('structural inherited ownership and reference regressions', () => {
 })
 
 describe('nested source audit regressions', () => {
-  it.each(carriers.filter(([name]) => name !== 'assistant' && name !== 'tool'))('refuses unknown content in %s messages even when the event is ignorable', (_name, carry) => {
+  it.each(carriers.filter(([name]) => name !== 'assistant' && name !== 'tool'))('preserves or positionally refuses unknown content in %s messages even when the event is ignorable', (name, carry) => {
     const input = dense([...opening(), user('human'), { ...carry({ ...message('future'), content: [{ type: 'future-block', sourceEventSeq: 2 }] }), ignorable: true }])
-    expect(() => migrate(input)).toThrow(/cannot safely transform unclassified message content/)
+    const before = JSON.stringify(input)
+    if (name === 'title') {
+      // The framed title request requires one text block; that owned rule, not the kind whitelist, refuses here.
+      expect(() => migrate(input)).toThrow('session/title-llm-request messages do not represent messageSeqs')
+      return
+    }
+    const target = migrate(input)
+    expect(roundTrip(target)).toEqual(target)
+    expect(JSON.stringify(input)).toBe(before)
   })
 
-  it('audits nested tool-result content instead of preserving unknown blocks as opaque tool JSON', () => {
+  it('audits known nested tool-result content while preserving unknown block types opaquely', () => {
     const result = (content: SessionFormatJsonObject[]) => row('tool/result', { turn: 1, step: 1, message: {
       id: 'result', role: 'user', source: { kind: 'tool', callId: 'call' },
       content: [{ type: 'tool-result', toolCallId: 'call', content }],
@@ -211,7 +219,13 @@ describe('nested source audit regressions', () => {
     const control = migrate(dense([...prefix, ordinary, ...closing()]))
     expect(control.events.at(-3)?.data).toEqual(ordinary.data)
     expect(roundTrip(control)).toEqual(control)
-    const unknown = result([{ type: 'future-block', sourceEventSeq: 2 }])
-    expect(() => migrate(dense([...prefix, unknown, ...closing()]))).toThrow(/cannot safely transform unclassified message content/)
+    const opaque = result([{ type: 'future-block', sourceEventSeq: 2 }])
+    const before = JSON.stringify(opaque)
+    const preserved = migrate(dense([...prefix, opaque, ...closing()]))
+    expect(preserved.events.at(-3)?.data).toEqual(opaque.data)
+    expect(JSON.stringify(opaque)).toBe(before)
+    expect(roundTrip(preserved)).toEqual(preserved)
+    const malformed = result([{ type: 'text', text: 12 }])
+    expect(() => migrate(dense([...prefix, malformed, ...closing()]))).toThrow('invalid message content kind "text"')
   })
 })
