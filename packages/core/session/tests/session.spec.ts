@@ -29,7 +29,7 @@ describe('Session', () => {
     const session = Session.create(SessionId('ignorable-non-surface'))
     const event = session.append('turn/start', { turn: 1 }, { ignorable: true })
     expect(event.ignorable).toBe(true)
-    expect(session.events[0]?.ignorable).toBe(true)
+    expect(session.eventAt(SessionSeq(0))?.ignorable).toBe(true)
     // survives structuredClone (the persistence-serialization boundary)
     expect(structuredClone(event).ignorable).toBe(true)
   })
@@ -60,7 +60,7 @@ describe('Session', () => {
       // @ts-expect-error — out-of-tree type not in SessionEventMap
       session.append('plugin/test', { payload: 1 }, { ignorable: true })
       expect(warn).not.toHaveBeenCalled()
-      expect(session.events[0]?.ignorable).toBe(true)
+      expect(session.eventAt(SessionSeq(0))?.ignorable).toBe(true)
     } finally {
       warn.mockRestore()
     }
