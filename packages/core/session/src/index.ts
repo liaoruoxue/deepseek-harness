@@ -726,13 +726,18 @@ export class Session {
     ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T>] : [opts?: AppendOpts]
   ): SessionEvent<T> {
     // opts[0] is SurfaceIntent for surface types, AppendOpts for non-surface;
-    // narrow by discriminant field presence instead of casting both ways.
+    // narrow by discriminant field presence instead of casting both ways. A
+    // widened caller can supply either surface field alone, so both are read
+    // through their own guard and reach surface validation unchanged.
     const appendOpts = opts[0]
-    const surfaceOpts = appendOpts !== undefined && 'surfaceOp' in appendOpts ? appendOpts : undefined
+    const surfaceOp = appendOpts !== undefined && 'surfaceOp' in appendOpts ? appendOpts.surfaceOp : undefined
+    const sourceEventSeqs = appendOpts !== undefined && 'sourceEventSeqs' in appendOpts
+      ? appendOpts.sourceEventSeqs
+      : undefined
     const ignorable = appendOpts !== undefined && 'ignorable' in appendOpts && appendOpts.ignorable === true
     const surfaceMetadata = {
-      ...surfaceOpts?.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: surfaceOpts.sourceEventSeqs },
-      ...surfaceOpts?.surfaceOp === undefined ? {} : { surfaceOp: surfaceOpts.surfaceOp },
+      ...sourceEventSeqs === undefined ? {} : { sourceEventSeqs },
+      ...surfaceOp === undefined ? {} : { surfaceOp },
     }
     const dataSnapshot = snapshotJsonValue(data)
     if (dataSnapshot === undefined) {
