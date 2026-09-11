@@ -12,8 +12,9 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionPersistence } from '../src/index.ts'
 
 /** One mounted backend under a session store, plus same-storage remount support. */
@@ -277,6 +278,71 @@ export function runLiveWritePathContract(
       expect((await readAll(ctx.sessionPersistence, session.id)).map(event => event.seq)).toEqual([0, 1])
       await second.close()
       await ctx.fiber.dispose()
+    })
+
+    it('cold-loads an unknown ignorable record unchanged and refuses the same record unmarked', async () => {
+      const backend = await make()
+      const { ctx } = backend
+      const session = ctx.sessions.create(SessionId('ignorable-cold-load'))
+      const handle = await ctx.sessionPersistence.create(session.header)
+      try {
+        session.append('turn/start', { turn: 1 })
+        session.append('user/message', createUserMessage({
+          content: [{ type: 'text', text: 'before' }], source: { kind: 'user' },
+        }), { surfaceOp: 'append' })
+        // Out-of-tree informational record; the write site marks it skippable.
+        // @ts-expect-error — type outside SessionEventMap, accepted as a log-only record
+        session.append('plugin/observed', { detail: 'click' }, { ignorable: true })
+        session.append('user/message', createUserMessage({
+          content: [{ type: 'text', text: 'after' }], source: { kind: 'user' },
+        }), { surfaceOp: 'append' })
+        session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+        await ctx.sessions.flush(session)
+      } finally {
+        await handle.close()
+      }
+      await ctx.fiber.dispose()
+
+      const cold = await backend.remount()
+      const loaded = await readAll(cold.sessionPersistence, session.id)
+      expect(loaded.map(event => [event.type, event.seq])).toEqual([
+        ['turn/start', 0],
+        ['user/message', 1],
+        ['plugin/observed', 2],
+        ['user/message', 3],
+        ['turn/end', 4],
+      ])
+      expect(loaded[2]?.ignorable).toBe(true)
+      // Skipping the record does not change reconstruction: the derived
+      // messages match the same durable log without the plugin record.
+      const rebuilt = Session.create(session.id, loaded)
+      const clean = Session.create(session.id, loaded
+        .filter(event => (event.type as string) !== 'plugin/observed')
+        .map((event, seq) => ({ ...event, seq: SessionSeq(seq) })))
+      expect(rebuilt.deriveMessages()).toEqual(clean.deriveMessages())
+
+      // The same record written without the marker refuses the cold load.
+      const unmarked = cold.sessions.create(SessionId('unmarked-cold-load'))
+      const unmarkedHandle = await cold.sessionPersistence.create(unmarked.header)
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        unmarked.append('turn/start', { turn: 1 })
+        // @ts-expect-error — type outside SessionEventMap, written unmarked on purpose
+        unmarked.append('plugin/observed', { detail: 'click' })
+        expect(warned).toHaveBeenCalled()
+        await cold.sessions.flush(unmarked)
+      } finally {
+        warned.mockRestore()
+        await unmarkedHandle.close()
+      }
+      await cold.fiber.dispose()
+
+      const verify = await backend.remount()
+      await expect(readAll(verify.sessionPersistence, unmarked.id)).rejects.toThrow(/not marked ignorable/)
+      // The marked session keeps loading in the same storage.
+      expect((await readAll(verify.sessionPersistence, session.id)).some(event => (event.type as string) === 'plugin/observed'))
+        .toBe(true)
+      await verify.fiber.dispose()
     })
   })
 }
