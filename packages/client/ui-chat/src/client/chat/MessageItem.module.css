@@ -253,7 +253,10 @@
   background-size: 200% 100%;
   background-clip: text;
   color: transparent;
-  animation: retry-shimmer 1.6s ease-in-out infinite;
+  /* Stepped, not eased: `background-position` under `background-clip: text`
+     repaints the glyphs every frame; 10 steps per 1.6s cycle keeps the shimmer
+     and cuts the per-cycle repaint count by an order of magnitude. */
+  animation: retry-shimmer 1.6s steps(10, end) infinite;
 }
 
 .retryRow[open] .retrySummary::after {

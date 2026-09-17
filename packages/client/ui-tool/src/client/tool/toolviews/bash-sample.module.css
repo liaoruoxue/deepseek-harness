@@ -93,27 +93,31 @@
   min-width: 0;
 }
 
-/* Running sweep glare — same deepsuite ShimmerText pattern as ToolRow. */
+/* Running sweep glare — same deepsuite ShimmerText pattern as ToolRow: a 300px
+   glare band held as a non-repeating background tile on a full-width box, so
+   the sweep animates `transform` instead of the `left` that reflowed the row. */
 .root[data-state='running']::after {
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
-  width: 300px;
+  width: 100%;
   background: linear-gradient(
     90deg,
     transparent 0%,
     color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%,
     transparent 100%
   );
+  background-size: 300px 100%;
+  background-repeat: no-repeat;
   animation: dsh-bash-row-sweep 2.6s ease-out infinite;
   pointer-events: none;
 }
 
 @keyframes dsh-bash-row-sweep {
-  0% { left: -300px; }
-  90%, 100% { left: 100%; }
+  0% { transform: translateX(-300px); }
+  90%, 100% { transform: translateX(100%); }
 }
 
 .leading {

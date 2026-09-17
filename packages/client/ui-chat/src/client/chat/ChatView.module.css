@@ -108,7 +108,10 @@
   color: transparent;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: dsh-turn-status-shimmer 1.8s linear infinite;
+  /* Stepped, not linear: `background-position` under `background-clip: text`
+     repaints the glyphs every frame, and 10 steps per 1.8s cycle still reads as
+     motion while cutting the per-cycle repaint count by an order of magnitude. */
+  animation: dsh-turn-status-shimmer 1.8s steps(10, end) infinite;
 }
 
 .turnStatusClock {

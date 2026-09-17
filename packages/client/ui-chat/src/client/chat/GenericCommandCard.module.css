@@ -13,20 +13,25 @@
   position: absolute;
   inset-block: 0;
   left: 0;
-  width: 300px;
+  width: 100%;
   background: linear-gradient(
     90deg,
     transparent 0%,
     color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%,
     transparent 100%
   );
+  /* The 300px is the glare band's width, held as a non-repeating background
+     tile; the full-width box lets the sweep animate `transform` instead of the
+     `left` that reflowed the row every frame. */
+  background-size: 300px 100%;
+  background-repeat: no-repeat;
   animation: dsh-command-row-sweep 2.6s ease-out infinite;
   pointer-events: none;
 }
 
 @keyframes dsh-command-row-sweep {
-  0% { left: -300px; }
-  90%, 100% { left: 100%; }
+  0% { transform: translateX(-300px); }
+  90%, 100% { transform: translateX(100%); }
 }
 
 .leading {

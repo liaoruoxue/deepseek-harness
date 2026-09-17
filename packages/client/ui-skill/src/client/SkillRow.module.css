@@ -22,20 +22,25 @@
   content: '';
   position: absolute;
   inset: 0 auto 0 0;
-  width: 300px;
+  width: 100%;
   background: linear-gradient(
     90deg,
     transparent 0%,
     color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%,
     transparent 100%
   );
+  /* 300px is the glare band's width, painted as a non-repeating background tile
+     on the full-width box; the sweep therefore animates `transform` rather than
+     the `left` edge that laid the row out again every frame. */
+  background-size: 300px 100%;
+  background-repeat: no-repeat;
   animation: dsh-skill-row-sweep 2.6s ease-out infinite;
   pointer-events: none;
 }
 
 @keyframes dsh-skill-row-sweep {
-  0% { left: -300px; }
-  90%, 100% { left: 100%; }
+  0% { transform: translateX(-300px); }
+  90%, 100% { transform: translateX(100%); }
 }
 
 .leading {
